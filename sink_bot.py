@@ -9,7 +9,7 @@ import asyncio
 _ = load_dotenv()
 
 # Get the token from the .env file
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN_TEST")
 
 # Set the prefix for the bot commands
 prefix = '!'

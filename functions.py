@@ -14,6 +14,15 @@ async def synchronizeSlashCommands(ctx):
 async def slashCommand(ctx: commands.Context):
     await ctx.send("SLAAAAAASH!")
 
+#Test
+@commands.command(name='repeat')
+async def repeatWord(ctx: commands.Context, str):
+    await ctx.send(str)
+
+@commands.command(name='repeatS')
+async def repeatSentence(ctx: commands.Context, *args):
+    arguments = " ".join(args) #Chars between the quotes get printed inbetween the joined args.
+    await ctx.send(arguments)
 @commands.command(name='removereaction')
 async def removeReaction(ctx: commands.Context):
     """
@@ -45,3 +54,5 @@ async def setup(bot):
     bot.add_command(synchronizeSlashCommands)
     bot.add_command(slashCommand)
     bot.add_command(removeReaction)
+    bot.add_command(repeatWord)
+    bot.add_command(repeatSentence)
