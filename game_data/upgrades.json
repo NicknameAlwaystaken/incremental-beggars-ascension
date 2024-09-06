@@ -1,0 +1,10 @@
+[
+    {
+        "id": "0",
+        "name": "Pouch",
+        "stat": "material.capacity",
+        "modifier_type": "add",
+        "value": 5,
+        "cost": 10
+    }
+]
