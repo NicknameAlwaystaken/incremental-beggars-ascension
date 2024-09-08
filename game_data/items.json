@@ -1,0 +1,9 @@
+[
+    {
+        "id": 0,
+        "name": "sword",
+        "attributes": {
+            "attack": 5
+        }
+    }
+]

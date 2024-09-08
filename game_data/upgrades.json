@@ -2,9 +2,25 @@
     {
         "id": "0",
         "name": "Pouch",
-        "stat": "material.capacity",
-        "modifier_type": "add",
-        "value": 5,
-        "cost": 10
+        "stat": "coin.capacity",
+        "modifier_type": "increase",
+        "modifier_value": 5,
+        "cost_material": "coin",
+        "cost": 10,
+        "max_purchases": 3,
+        "unlocks_activity": null,
+        "description": "No description"
+    },
+    {
+        "id": "1",
+        "name": "Sticky fingers",
+        "stat": "coin.gain",
+        "modifier_type": "multiplier",
+        "modifier_value": 1.1,
+        "cost_material": "coin",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlocks_activity": "pickpocketing",
+        "description": "No description"
     }
 ]
