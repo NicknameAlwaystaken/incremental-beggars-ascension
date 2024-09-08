@@ -1,2 +1,2 @@
-# sink-bot
-Bot for SinkisonFire stream discord community
+# incremental-beggars-ascension
+Bot for Incremental Beggar's Ascension
