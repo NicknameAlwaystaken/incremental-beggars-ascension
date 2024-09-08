@@ -9,10 +9,10 @@ import asyncio
 _ = load_dotenv()
 
 # Get the token from the .env file
-TOKEN = os.getenv("DISCORD_TOKEN_TEST")
+TOKEN = os.getenv("DISCORD_TOKEN_STABLE")
 
 # Set the prefix for the bot commands
-prefix = '.'
+prefix = '!'
 
 # Set the intents for the bot
 # Intents are used to determine what the bot can see and do
