@@ -1,0 +1,12 @@
+[
+    {
+        "id": 0,
+        "name": "Beg",
+        "type": "continuous",
+        "output_item": "coins",
+        "output_amount": 1,
+        "duration_seconds": 5,
+        "description": "Beg for coins on the streets.",
+        "status_description": "You are begging for coins."
+    }
+]

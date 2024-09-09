@@ -7,7 +7,8 @@ import math
 import json
 import os
 import copy
-from functools import partial
+from views import ShopMenuView, MainMenuView, ActivitiesMenuView
+from typing import Optional
 
 tree = None
 
@@ -19,14 +20,20 @@ MAX_MESSAGE_LENGTH = 2000
 
 GAME_NAME = "Beggar's Ascension"
 
-BASELINE_STATS = {
-    'coins': {'amount': 0, 'gain': 0.5, 'capacity': 10, 'last_gained': 0, 'unlocked': True}
-}
-
 
 class Activity:
-    def __init__(self, id, name) -> None:
-        pass
+    def __init__(self, id, name, activity_type, output_item, output_amount, duration_seconds, description, status_description):
+        self.id = id
+        self.name = name
+        self.activity_type = activity_type
+        self.output_item = output_item
+        self.output_amount = output_amount
+        self.duration_seconds = duration_seconds
+        self.description = description
+        self.status_description = status_description
+
+    def __str__(self):
+        return f'{self.description}'
 
 
 class Currency:
@@ -35,7 +42,14 @@ class Currency:
         self.name = name
         self.amount = 0
         self.capacity = capacity
+        self.base_capacity = capacity
         self.last_gained = 0
+
+    def add_amount(self, amount: float):
+        current_amount = self.amount
+        self.amount += amount
+        self.amount = min(self.amount, self.capacity)
+        self.last_gained = self.amount - current_amount
 
     def __str__(self):
         return f"{self.name}: {format_number(self.amount)}/{format_number(self.capacity)} " \
@@ -62,16 +76,16 @@ class Upgrade:
 
 class Player:
     def __init__(self, player_id: str, display_name: str):
-        self.player_id: str = player_id
+        self.id: str = player_id
         self.title = 'Beggar'
         self.display_name = display_name
         self.currencies: dict[int, Currency] = {}
-        self.upgrades: dict[int, Upgrade] = {}
+        self.upgrades: dict[int,  Upgrade] = {}
         self.stat_modifiers: dict[str, dict[str, float]] = {}
         self.last_update_time = datetime.now()
-        self.current_activity = None
+        self.current_activity: Optional[Activity] = None
 
-    def buy_upgrade(self, upgrade: Upgrade):
+    def buy_upgrade(self, upgrade:  Upgrade):
         new_upgrade = copy.deepcopy(upgrade)
         material_type = new_upgrade.cost_material
         cost = new_upgrade.cost
@@ -88,15 +102,17 @@ class Player:
         if currency_id not in self.currencies:
             self.currencies[currency_id] = currency
 
-    def add_upgrade(self, upgrade: Upgrade) -> bool:
-        upgrade_id = upgrade.id
+    def add_upgrade(self, upgrade:  Upgrade) -> bool:
+        new_upgrade = upgrade
+        upgrade_id = new_upgrade.id
         if upgrade_id in self.upgrades:
-            if upgrade.max_purchases > self.upgrades[upgrade_id].count:
+            if new_upgrade.max_purchases > self.upgrades[upgrade_id].count:
                 self.upgrades[upgrade_id].count += 1
             else:
                 return False
         else:
-            self.upgrades[upgrade_id] = upgrade
+            new_upgrade.count = 1
+            self.upgrades[upgrade_id] = new_upgrade
 
         self.recalculate_stat_modifiers()
         return True
@@ -111,20 +127,48 @@ class Player:
             modifier_value = upgrade.modifier_value
 
             if stat:
-                if stat not in self.stat_modifiers:
-                    self.stat_modifiers[stat] = {'increase': 0, 'multiplier': 1.0}
+                for _ in range(upgrade.count):
+                    if stat not in self.stat_modifiers:
+                        self.stat_modifiers[stat] = {'increase': 0, 'multiplier': 1.0}
 
-                if modifier_type == 'multiplier':
-                    self.stat_modifiers[stat]['multiplier'] *= modifier_value
+                    if modifier_type == 'multiplier':
+                        self.stat_modifiers[stat]['multiplier'] *= modifier_value
 
-                if modifier_type == 'increase':
-                    self.stat_modifiers[stat]['increase'] += modifier_value
+                    if modifier_type == 'increase':
+                        self.stat_modifiers[stat]['increase'] += modifier_value
 
+        self.apply_currency_modifiers()
+
+    def apply_currency_modifiers(self):
+        for currency in self.currencies.values():
+            if currency.name == 'coins':
+                capacity_modifiers = self.stat_modifiers.get('coins.capacity', {'increase': 0, 'multiplier': 1.0})
+
+                currency.capacity = (currency.base_capacity + capacity_modifiers['increase']) * capacity_modifiers['multiplier']
+
+    def change_activity(self, activity: Activity):
         self.update(datetime.now())
 
-    def update(self, current_time):
+        self.current_activity = activity
 
-        self.last_update_time = datetime.now()
+    def update(self, current_time):
+        if self.current_activity:
+            current_activity = self.current_activity
+
+            output_amount = current_activity.output_amount
+            duration_seconds = current_activity.duration_seconds
+
+            time_difference = (current_time - self.last_update_time).total_seconds()
+            amount_to_add = (output_amount / duration_seconds) * time_difference
+
+            player_currency = self.currencies[0]
+            if player_currency.name in self.stat_modifiers:
+                currency_modifier = self.stat_modifiers[player_currency.name]
+                amount_to_add *= currency_modifier['multiplier']
+
+            player_currency.add_amount(amount_to_add)
+
+        self.last_update_time = current_time
 
     def __str__(self):
 
@@ -138,8 +182,10 @@ class IncrementalGameCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.players: dict[str, Player] = {}
-        self.upgrades: dict[int, Upgrade] = {}
+        self.upgrades: dict[int,  Upgrade] = {}
+        self.activities: dict[int, Activity] = {}
         self.currencies: dict[int, Currency] = {}
+        self.views: dict[int, discord.ui.View] = {}
 
     # Command to send a message with the button
     @commands.hybrid_command(name='play', with_app_command=True)
@@ -147,108 +193,106 @@ class IncrementalGameCog(commands.Cog):
         """Interactive play command"""
         user_id = ctx.author.id
         player = await self.get_player(user_id)
-        view = self.MyView(self, user_id)
+
         if not player:
+            view = MainMenuView(self, user_id)
             view.create_register_menu()
-            await ctx.send(content="You have not registered yet!", view=view)
+            message = await ctx.send(content="You have not registered yet!", view=view)
+            self.views[message.id] = view
         else:
-            view.create_main_menu()
-            await ctx.send(content='', embed=self.player_stats_embed_message(player), view=view)
+            view = MainMenuView(self, user_id)
+            message = await ctx.send(content='', embed=self.player_stats_embed_message(player), view=view)
+            self.views[message.id] = view
 
-    class MyView(discord.ui.View):
-        def __init__(self, cog, user_id):
-            super().__init__(timeout=None)
-            self.cog = cog
-            self.user_id = user_id
+    async def shop_menu_callback(self, interaction: discord.Interaction):
+        user = interaction.user
+        if not await self._is_valid_interaction(interaction):
+            return
 
-        async def shop_menu_callback(self, interaction: discord.Interaction):
-            user = interaction.user
-            if user.id != self.user_id:
-                return
-            player = await self.cog.get_player(user.id)
-            if player:
-                self.create_shop_menu(player)
-                await interaction.response.edit_message(content='', embed=self.cog.player_shop_embed_message(player), view=self)
+        player = await self.get_player(str(user.id))
+        if player:
+            await self.update_player(player)
+            view = ShopMenuView(self, user.id, player)
+            await interaction.response.edit_message(content='', embed=self.player_shop_embed_message(player), view=view)
 
-        async def update_callback(self, interaction: discord.Interaction):
-            user = interaction.user
-            if user.id != self.user_id:
-                return
-            player = await self.cog.get_player(user.id)
-            if player:
-                player.update(datetime.now())
+    async def update_callback(self, interaction: discord.Interaction):
+        user = interaction.user
+        if not await self._is_valid_interaction(interaction):
+            return
 
-        async def main_menu_callback(self, interaction: discord.Interaction):
-            user = interaction.user
-            if user.id != self.user_id:
-                return
-            player = await self.cog.get_player(user.id)
-            if player:
-                self.create_main_menu()
-                await interaction.response.edit_message(content='', embed=self.cog.player_stats_embed_message(player), view=self)
-            else:
-                self.create_register_menu()
-                message = f"{user.display_name} to play you need to register first!"
-                await interaction.response.edit_message(content=message, view=self)
+        player = await self.get_player(str(user.id))
+        if player:
+            await self.update_player(player)
 
-        async def buy_upgrade_callback(self, interaction: discord.Interaction, upgrade: Upgrade):
-            user = interaction.user
-            if user.id != self.user_id:
-                return
-            player = await self.cog.get_player(user.id)
+    async def main_menu_callback(self, interaction: discord.Interaction):
+        user = interaction.user
+        if not await self._is_valid_interaction(interaction):
+            return
 
-            if player:
-                player.buy_upgrade(upgrade)
-                self.create_shop_menu(player)
-                await interaction.response.edit_message(content='', embed=self.cog.player_shop_embed_message(player), view=self)
+        player = await self.get_player(str(user.id))
+        if player:
+            await self.update_player(player)
+            view = MainMenuView(self, user.id)
+            await interaction.response.edit_message(content='', embed=self.player_stats_embed_message(player), view=view)
 
-        async def register_callback(self, interaction: discord.Interaction):
-            user = interaction.user
-            if user.id != self.user_id:
-                return
+    async def activities_menu_callback(self, interaction: discord.Interaction):
+        user = interaction.user
+        if not await self._is_valid_interaction(interaction):
+            return
 
-            player = await self.cog.get_player(user.id)
+        player = await self.get_player(str(user.id))
+        if player:
+            await self.update_player(player)
+            view = ActivitiesMenuView(self, user.id, player)
+            await interaction.response.edit_message(content='', embed=self.player_activities_embed_message(player), view=view)
 
-            if not player:
-                # Register the player and update the message
-                await self.cog.register_player(user.id, user.display_name)
-                player = await self.cog.get_player(user.id)
-                self.create_main_menu()
-                await interaction.response.edit_message(content='', embed=self.cog.player_stats_embed_message(player), view=self)
+    async def buy_upgrade_callback(self, interaction: discord.Interaction, upgrade:  Upgrade):
+        user = interaction.user
+        if not await self._is_valid_interaction(interaction):
+            return
 
-        def create_main_menu(self):
-            self.clear_items()
-            shop_button = discord.ui.Button(label='Shop', style=discord.ButtonStyle.primary)
-            shop_button.callback = self.shop_menu_callback
-            self.add_item(shop_button)
+        player = await self.get_player(str(user.id))
 
-            update_button = discord.ui.Button(label='Update', style=discord.ButtonStyle.secondary, row=1)
-            update_button.callback = self.main_menu_callback
-            self.add_item(update_button)
+        if player:
+            player.buy_upgrade(upgrade)
+            await self.update_player(player)
+            view = ShopMenuView(self, user.id, player)
+            await interaction.response.edit_message(content='', embed=self.player_shop_embed_message(player), view=view)
 
-        def create_shop_menu(self, player):
-            self.clear_items()
+    async def start_activity_callback(self, interaction: discord.Interaction, activity: Activity):
+        user = interaction.user
+        if not await self._is_valid_interaction(interaction):
+            return
 
-            missing_upgrades = self.cog.get_missing_upgrades(player)
+        player = await self.get_player(str(user.id))
 
-            for upgrade in missing_upgrades.values():
-                if upgrade.max_purchases > 0:
-                    buy_upgrade_button = discord.ui.Button(label=f'Buy {upgrade.name}', style=discord.ButtonStyle.success)
-                    buy_upgrade_button.callback = partial(self.buy_upgrade_callback, upgrade=upgrade)
-                    self.add_item(buy_upgrade_button)
+        if player:
+            player.change_activity(activity)
+            await self.update_player(player)
+            view = ActivitiesMenuView(self, user.id, player)
+            await interaction.response.edit_message(content='', embed=self.player_activities_embed_message(player), view=view)
 
-            back_button = discord.ui.Button(label='Back', style=discord.ButtonStyle.danger)
-            back_button.callback = self.main_menu_callback
-            self.add_item(back_button)
+    async def register_callback(self, interaction: discord.Interaction):
+        user = interaction.user
+        if not await self._is_valid_interaction(interaction):
+            return
 
-            update_button = discord.ui.Button(label='Update', style=discord.ButtonStyle.secondary, row=1)
-            update_button.callback = self.shop_menu_callback
-            self.add_item(update_button)
+        player = await self.get_player(str(user.id))
 
-        def create_register_menu(self):
-            register_button = discord.ui.Button(label='Register', style=discord.ButtonStyle.success)
-            register_button.callback = self.register_callback
-            self.add_item(register_button)
+        if not player:
+            # Register the player and update the message
+            await self.register_player(str(user.id), user.display_name)
+            player = await self.get_player(str(user.id))
+            await self.update_player(player)
+            view = MainMenuView(self, user.id)
+            await interaction.response.edit_message(content='', embed=self.player_stats_embed_message(player), view=view)
+
+    async def _is_valid_interaction(self, interaction: discord.Interaction):
+        view = self.views.get(interaction.message.id)
+
+        if view and not view.is_owner(interaction):
+            return False
+        return True
 
     async def get_currencies_from_db(self):
         async with aiosqlite.connect(DB_NAME) as db:
@@ -264,6 +308,22 @@ class IncrementalGameCog(commands.Cog):
                         currency[0], currency[1],
                         currency[2])
 
+    async def get_activities_from_db(self):
+        async with aiosqlite.connect(DB_NAME) as db:
+            async with db.execute('''
+            SELECT activity_id, name, type, output_item, output_amount, duration_seconds, description, status_description
+            FROM activities''') as cursor:
+
+                activities = await cursor.fetchall()
+
+                self.activities = {}
+                for activity in activities:
+                    self.activities[activity[0]] = Activity(
+                        activity[0], activity[1],
+                        activity[2], activity[3],
+                        activity[4], activity[5],
+                        activity[6], activity[7])
+
     async def get_upgrades_from_db(self):
         async with aiosqlite.connect(DB_NAME) as db:
             async with db.execute('''
@@ -274,12 +334,27 @@ class IncrementalGameCog(commands.Cog):
 
                 self.upgrades = {}
                 for upgrade in upgrades:
-                    self.upgrades[upgrade[0]] = Upgrade(
+                    self.upgrades[upgrade[0]] =  Upgrade(
                         upgrade[0], upgrade[1],
                         upgrade[2], upgrade[3],
                         upgrade[4], upgrade[5],
                         upgrade[6], upgrade[7],
                         upgrade[8], upgrade[9])
+
+    async def get_player_activities_from_db(self, player_id):
+        await self.get_activities_from_db()
+        async with aiosqlite.connect(DB_NAME) as db:
+            async with db.execute('''
+            SELECT player_id, activity_id
+            FROM player_activities
+            WHERE player_id = ?''', (player_id,)) as cursor:
+
+                player_activities = await cursor.fetchall()
+
+                for player_activity in player_activities:
+                    player_id, activity_id = player_activity
+                    player = self.players[player_id]
+                    player.current_activity = self.activities[activity_id]
 
     async def get_player_currencies_from_db(self, player_id):
         await self.get_currencies_from_db()
@@ -295,8 +370,8 @@ class IncrementalGameCog(commands.Cog):
                     player_id, currency_id, amount = player_currency
                     player = self.players[player_id]
                     currency = self.currencies[currency_id]
-                    currency.amount = amount
                     player.add_currency(currency)
+                    currency.add_amount(amount)
 
     async def get_player_upgrades_from_db(self, player_id):
         await self.get_upgrades_from_db()
@@ -318,21 +393,21 @@ class IncrementalGameCog(commands.Cog):
     async def get_player_from_db(self, player_id):
         async with aiosqlite.connect(DB_NAME) as db:
             async with db.execute('''
-            SELECT player_id, player_display_name, current_activity, last_update_time
+            SELECT player_id, player_display_name, last_update_time
             FROM players
             WHERE player_id = ?''', (player_id,)) as cursor:
 
                 found_player = await cursor.fetchone()
 
                 if found_player:
-                    player_id, display_name, current_activity, last_update_time = found_player
+                    player_id, display_name, last_update_time = found_player
                     player = Player(player_id, display_name)
                     player.last_update_time = datetime.fromisoformat(last_update_time)
-                    player.current_activity = current_activity
                     self.players[player_id] = player
                     await self.get_player_upgrades_from_db(player_id)
                     await self.get_player_currencies_from_db(player_id)
-                    player.update(datetime.now())
+                    await self.get_player_activities_from_db(player_id)
+                    await self.update_player(player)
                     return player
                 else:
                     return None
@@ -349,13 +424,10 @@ class IncrementalGameCog(commands.Cog):
             await self.player_to_database_update(player_id)
             return self.players[player_id]
 
-    def update_player(self, player_id):
-        if player_id in self.players:
-            player = self.players[player_id]
-            current_time = datetime.now()
-            player.update(current_time)
-            return True
-        return False
+    async def update_player(self, player):
+        current_time = datetime.now()
+        player.update(current_time)
+        await self.player_to_database_update(player.id)
 
     async def player_to_database_update(self, player_id):
         async with aiosqlite.connect(DB_NAME) as db:
@@ -363,6 +435,7 @@ class IncrementalGameCog(commands.Cog):
             player = self.players[player_id]
             player_upgrades = [(id, upgrade.count) for id, upgrade in player.upgrades.items()]
             player_currencies = [(id, currency.amount) for id, currency in player.currencies.items()]
+            player_activity = player.current_activity
 
             placeholders_upgrades = ', '.join('?' for _ in player_upgrades)
             placeholders_currencies = ', '.join('?' for _ in player_currencies)
@@ -379,7 +452,7 @@ class IncrementalGameCog(commands.Cog):
             else:
                 await db.execute("DELETE FROM player_upgrades WHERE player_id = ?", (player_id,))
 
-            # Clear all upgrades that player doesn't have anymore
+            # Clear all currencies that player doesn't have anymore
             if player_currencies:
                 query = f"DELETE FROM player_currencies WHERE player_id = ? AND currency_id NOT IN ({placeholders_currencies})"
 
@@ -388,6 +461,16 @@ class IncrementalGameCog(commands.Cog):
                 await db.execute(query, params_currencies)
             else:
                 await db.execute("DELETE FROM player_upgrades WHERE player_id = ?", (player_id,))
+
+            # Clear all activities that player doesn't have anymore
+            if player_activity:
+                query = "DELETE FROM player_activities WHERE player_id = ? AND activity_id != ?"
+
+                params_activities = [player_id, player_activity.id]
+
+                await db.execute(query, params_activities)
+            else:
+                await db.execute("DELETE FROM player_activities WHERE player_id = ?", (player_id,))
 
             # Add or update changed upgrades
             for player_upgrade in player_upgrades:
@@ -403,23 +486,28 @@ class IncrementalGameCog(commands.Cog):
                     VALUES (?, ?, ?)
                 ''', (player_id, player_currency[0], player_currency[1]))
 
+            # Add or update changed activities
+            if player_activity:
+                await db.execute('''
+                    INSERT OR REPLACE INTO player_activities (player_id, activity_id)
+                    VALUES (?, ?)
+                ''', (player_id, player_activity.id))
+
             # Check if the player exists in the database
             async with db.execute('SELECT 1 FROM players WHERE player_id = ?', (player_id,)) as cursor:
                 found_player = await cursor.fetchone()
 
-            player.update(datetime.now())
-
             if found_player:
                 await db.execute('''
                 UPDATE players
-                SET player_display_name = ?, current_activity = ?, last_update_time = ?
+                SET player_display_name = ?, last_update_time = ?
                 WHERE player_id == ?
-                ''', (player.display_name, player.current_activity, player.last_update_time, player_id))
+                ''', (player.display_name, player.last_update_time, player_id))
             else:
                 await db.execute('''
-                INSERT INTO players (player_id, player_display_name, current_activity, last_update_time)
-                VALUES (?, ?, ?, ?)
-                ''', (player_id, player.display_name, player.current_activity, player.last_update_time))
+                INSERT INTO players (player_id, player_display_name, last_update_time)
+                VALUES (?, ?, ?)
+                ''', (player_id, player.display_name, player.last_update_time))
 
             await db.commit()
 
@@ -436,6 +524,11 @@ class IncrementalGameCog(commands.Cog):
             description=f"**{player.title}**: __{player.display_name}__",
             color=discord.Color.green()
         )
+        if player.current_activity:
+            embed.add_field(name="🏃 Current activity", value=player.current_activity.status_description, inline=False)
+        else:
+            embed.add_field(name="🏃 Current activity", value='Currently doing nothing. Go get an activity!', inline=False)
+
         formatted_currencies = []
         for currency in player.currencies.values():
             formatted_currencies.append(f"{currency.name.capitalize()}: {format_number(currency.amount)}/{format_number(currency.capacity)} (+{format_number(currency.last_gained)})")
@@ -462,15 +555,19 @@ class IncrementalGameCog(commands.Cog):
         missing_upgrades = self.get_missing_upgrades(player)
 
         if missing_upgrades:
-            embed.add_field(
-                name="🛠️ Buyable Upgrades",
-                value='\n\n'.join([
+            upgrade = missing_upgrades[0]
+            upgrades_left = missing_upgrades[1]
+            missing_upgrades_text = []
+            for upgrade, upgrades_left in missing_upgrades:
+                missing_upgrades_text.append(
                     f"**{upgrade.name}**\n"
                     f"• Cost: `{upgrade.cost} {upgrade.cost_material}{'s' if upgrade.cost > 1 else ''}`\n"
-                    f"• Remaining: `{upgrade.max_purchases}`\n"
+                    f"• Remaining: `{upgrades_left}`\n"
                     f"• Effect: {self.format_upgrade_text(upgrade)}"
-                    for upgrade in missing_upgrades.values()
-                ]),
+                )
+            embed.add_field(
+                name="🛠️ Buyable Upgrades",
+                value='\n\n'.join(missing_upgrades_text),
                 inline=False
             )
         else:
@@ -481,7 +578,21 @@ class IncrementalGameCog(commands.Cog):
 
         return embed
 
-    def format_upgrade_text(self, upgrade: Upgrade):
+    def player_activities_embed_message(self, player):
+        """Create the activities embed message for the player."""
+        embed = discord.Embed(
+            title="Available Activities",
+            description=f"Here are the activities you can start, {player.display_name}",
+            color=discord.Color.green()
+        )
+
+        activities = self.get_available_activities(player)
+        for activity in activities.values():
+            embed.add_field(name=activity.name, value=activity.description, inline=False)
+
+        return embed
+
+    def format_upgrade_text(self, upgrade:  Upgrade):
         material_type, material_modifier = upgrade.stat.split('.')
         amount = upgrade.modifier_value
         modifier_type = upgrade.modifier_type
@@ -495,7 +606,7 @@ class IncrementalGameCog(commands.Cog):
         return f'{modifier_type_text} {material_type.capitalize()} {modifier_text} by {format_number(amount)}'
 
     def get_missing_upgrades(self, player):
-        missing_upgrades = {}
+        missing_upgrades = []
         upgrades_list = copy.deepcopy(self.upgrades)
         for id, upgrade in upgrades_list.items():
             if id in player.upgrades:
@@ -504,13 +615,12 @@ class IncrementalGameCog(commands.Cog):
                 upgrades_left = upgrade.max_purchases
 
             if upgrades_left > 0:
-                upgrade.max_purchases = upgrades_left
-                missing_upgrades[id] = upgrade
-            else:
-                if id in missing_upgrades:
-                    del missing_upgrades[id]
+                missing_upgrades.append((upgrade, upgrades_left))
 
         return missing_upgrades
+
+    def get_available_activities(self, player):
+        return self.activities
 
 
 @commands.command(name='sync')
@@ -549,6 +659,38 @@ def format_number(number, sig_figs=3):
         return f"{value_str}{prefix}"
     else:
         return value_str
+
+
+async def create_player_activities_table(database_name):
+    async with aiosqlite.connect(database_name) as db:
+        # Create a table if it doesn't exist
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS player_activities (
+            player_id INTEGER NOT NULL,
+            activity_id INTEGER NOT NULL,
+            PRIMARY KEY (player_id, activity_id),
+            FOREIGN KEY (activity_id) REFERENCES activities(activity_id)
+        )
+        ''')
+        await db.commit()
+
+
+async def create_activities_table(database_name):
+    async with aiosqlite.connect(database_name) as db:
+        # Create a table if it doesn't exist
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS activities (
+            activity_id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            output_item TEXT NOT NULL,
+            output_amount INTEGER NOT NULL,
+            duration_seconds INTEGER NOT NULL,
+            description TEXT,
+            status_description TEXT
+        )
+        ''')
+        await db.commit()
 
 
 async def create_player_upgrades_table(database_name):
@@ -666,10 +808,25 @@ async def create_players_table(database_name):
             CREATE TABLE IF NOT EXISTS players (
                 player_id INTEGER PRIMARY KEY,
                 player_display_name TEXT NOT NULL,
-                current_activity TEXT,
                 last_update_time TEXT
             )
         ''')
+        await db.commit()
+
+
+async def update_activities_from_json_to_db(database_name):
+    with open(os.path.join(game_data_folder, 'activities.json')) as file:
+        activities = json.load(file)
+
+    async with aiosqlite.connect(database_name) as db:
+        for activity in activities:
+            await db.execute('''
+                INSERT OR IGNORE INTO activities (activity_id, name, type, output_item, output_amount, duration_seconds, description, status_description)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (activity['id'], activity['name'], activity['type'],
+                  activity['output_item'], activity['output_amount'],
+                  activity['duration_seconds'], activity['description'],
+                  activity['status_description']))
         await db.commit()
 
 
@@ -733,6 +890,10 @@ async def setup(bot):
     # await update_items_from_json_to_db(DB_NAME)
     # await create_player_items_table(DB_NAME)
 
+    await create_activities_table(DB_NAME)
+    await update_activities_from_json_to_db(DB_NAME)
+    await create_player_activities_table(DB_NAME)
+
     await create_currencies_table(DB_NAME)
     await update_currencies_from_json_to_db(DB_NAME)
     await create_player_currencies_table(DB_NAME)
@@ -745,3 +906,5 @@ async def setup(bot):
     await bot.add_cog(game_cog)
     await game_cog.get_currencies_from_db()
     await game_cog.get_upgrades_from_db()
+    await game_cog.get_activities_from_db()
+
