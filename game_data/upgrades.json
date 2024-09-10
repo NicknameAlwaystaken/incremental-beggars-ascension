@@ -8,7 +8,7 @@
         "cost_material": "coins",
         "cost": 10,
         "max_purchases": 3,
-        "unlocks_activity": null,
+        "unlocks": [],
         "description": "No description"
     },
     {
@@ -20,7 +20,7 @@
         "cost_material": "coins",
         "cost": 20,
         "max_purchases": 1,
-        "unlocks_activity": "pickpocketing",
+        "unlocks": ["pickpocketing"],
         "description": "No description"
     }
 ]

@@ -12,7 +12,7 @@ class BaseView(discord.ui.View):
         return interaction.user.id == self.user_id
 
     def add_back_button(self, callback):
-        back_button = discord.ui.Button(label='Back', style=discord.ButtonStyle.danger)
+        back_button = discord.ui.Button(label='Back', style=discord.ButtonStyle.secondary)
         back_button.callback = callback
         self.add_item(back_button)
 
@@ -59,7 +59,7 @@ class ShopMenuView(BaseView):
     def create_shop_menu(self, player):
         self.clear_items()
         missing_upgrades = self.cog.get_missing_upgrades(player)
-        for upgrade, upgrades_left in missing_upgrades:
+        for upgrade, _ in missing_upgrades:
             currency = next((c for c in player.currencies.values() if c.name == upgrade.cost_material), None)
             button_style = discord.ButtonStyle.success if currency and currency.amount >= upgrade.cost else discord.ButtonStyle.secondary
             buy_button = discord.ui.Button(label=f'Buy {upgrade.name}', style=button_style)
@@ -78,11 +78,17 @@ class ActivitiesMenuView(BaseView):
 
     def create_activities_menu(self, player):
         self.clear_items()
+
+        if player.current_activity:
+            stop_activity_button = discord.ui.Button(label=f'Stop', style=discord.ButtonStyle.danger)
+            stop_activity_button.callback = partial(self.cog.start_activity_callback, activity=None)
+            self.add_item(stop_activity_button)
+
         activities = self.cog.get_available_activities(player)
 
-        for activity in activities.values():
+        for activity in activities:
             button_style = discord.ButtonStyle.success if player.current_activity and player.current_activity.id == activity.id else discord.ButtonStyle.primary
-            activity_button = discord.ui.Button(label=f'Start {activity.name}', style=button_style)
+            activity_button = discord.ui.Button(label=f'{activity.name}', style=button_style)
             activity_button.callback = partial(self.cog.start_activity_callback, activity=activity)
             self.add_item(activity_button)
 
