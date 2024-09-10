@@ -1,12 +1,24 @@
 [
     {
         "id": 0,
-        "name": "Beg",
+        "name": "Beg 🙏",
         "type": "continuous",
         "output_item": "coins",
-        "output_amount": 1,
-        "duration_seconds": 5,
+        "output_amount": 0.2,
+        "duration_seconds": 1,
+        "unlock_conditions": [],
         "description": "Beg for coins on the streets.",
         "status_description": "You are begging for coins."
+    },
+    {
+        "id": 1,
+        "name": "Rob Beggars 🦹",
+        "type": "continuous",
+        "output_item": "coins",
+        "output_amount": 0.3,
+        "duration_seconds": 1,
+        "unlock_conditions": ["pickpocketing"],
+        "description": "Rob beggars on the streets.",
+        "status_description": "You are robbing beggars for coins."
     }
 ]
