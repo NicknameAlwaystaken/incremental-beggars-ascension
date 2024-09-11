@@ -60,6 +60,8 @@ class ShopMenuView(BaseView):
         self.clear_items()
         missing_upgrades = self.cog.get_missing_upgrades(player)
         for upgrade, _ in missing_upgrades:
+            if not self.cog.check_conditions(player, upgrade.unlock_conditions):
+                continue
             currency = next((c for c in player.currencies.values() if c.name == upgrade.cost_material), None)
             button_style = discord.ButtonStyle.success if currency and currency.amount >= upgrade.cost else discord.ButtonStyle.secondary
             buy_button = discord.ui.Button(label=f'Buy {upgrade.name}', style=button_style)

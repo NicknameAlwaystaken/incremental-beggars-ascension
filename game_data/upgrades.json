@@ -2,25 +2,49 @@
     {
         "id": "0",
         "name": "Pouch",
-        "stat": "coins.capacity",
-        "modifier_type": "increase",
-        "modifier_value": 5,
         "cost_material": "coins",
         "cost": 10,
         "max_purchases": 3,
+        "unlock_conditions": [],
         "unlocks": [],
-        "description": "No description"
+        "description": "No description",
+        "effects": {
+            "coins.capacity": {
+                "modifier_type": "increase",
+                "modifier_value": 5
+            }
+        }
     },
     {
         "id": "1",
         "name": "Sticky fingers",
-        "stat": "coins.gain",
-        "modifier_type": "multiplier",
-        "modifier_value": 1.5,
         "cost_material": "coins",
         "cost": 20,
         "max_purchases": 1,
+        "unlock_conditions": [],
         "unlocks": ["pickpocketing"],
-        "description": "No description"
+        "description": "No description",
+        "effects": {
+            "coins.gain": {
+                "modifier_type": "multiplier",
+                "modifier_value": 1.5
+            }
+        }
+    },
+    {
+        "id": "2",
+        "name": "Tattered Mat",
+        "cost_material": "coins",
+        "cost": 10,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.stamina.6"],
+        "unlocks": [],
+        "description": "No description",
+        "effects": {
+            "energy.recovery": {
+                "modifier_type": "increase",
+                "modifier_value": 0.1
+            }
+        }
     }
 ]
