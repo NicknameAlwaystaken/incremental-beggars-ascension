@@ -11,8 +11,8 @@ class BaseView(discord.ui.View):
     def is_owner(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
-    def add_back_button(self, callback):
-        back_button = discord.ui.Button(label='Back', style=discord.ButtonStyle.secondary)
+    def add_back_button(self, callback, row=1):
+        back_button = discord.ui.Button(label='Back', style=discord.ButtonStyle.primary, row=row)
         back_button.callback = callback
         self.add_item(back_button)
 
@@ -69,8 +69,8 @@ class ShopMenuView(BaseView):
             self.add_item(buy_button)
 
         # Back and Update buttons
-        self.add_back_button(self.cog.main_menu_callback)
         self.add_update_button(self.cog.shop_menu_callback)
+        self.add_back_button(self.cog.main_menu_callback)
 
 
 class ActivitiesMenuView(BaseView):
@@ -95,6 +95,6 @@ class ActivitiesMenuView(BaseView):
             self.add_item(activity_button)
 
         # Back and Update buttons
-        self.add_back_button(self.cog.main_menu_callback)
         self.add_update_button(self.cog.activities_menu_callback)
+        self.add_back_button(self.cog.main_menu_callback)
 

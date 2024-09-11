@@ -6,7 +6,6 @@ import aiosqlite
 import math
 import json
 import os
-import copy
 from views import ShopMenuView, MainMenuView, ActivitiesMenuView
 from typing import Optional, Any
 
@@ -78,6 +77,21 @@ class Skill:
         self.current_exp = current_exp
         self.last_gained = 0
 
+    def copy(self):
+        new_skill = Skill(
+            id=self.id,
+            name=self.name,
+            base_exp_requirement=self.base_exp_requirement,
+            scaling_factor=self.scaling_factor,
+            description=self.description,
+            exp_formula=self.exp_formula,
+            max_level=self.max_level,
+            start_level=self.start_level,
+            current_exp=self.current_exp
+        )
+
+        return new_skill
+
     def exp_required_for_next_level(self):
         if self.current_level >= self.max_level:
             return 0
@@ -119,6 +133,21 @@ class Activity:
         self.description = description
         self.status_description = status_description
 
+    def copy(self):
+        new_activity = Activity(
+            id=self.id,
+            name=self.name,
+            icon=self.icon,
+            output_item=self.output_item,
+            output_amount=self.output_amount,
+            energy_drain_rate=self.energy_drain_rate,
+            unlock_conditions=self.unlock_conditions[:],
+            description=self.description,
+            status_description=self.status_description
+        )
+
+        return new_activity
+
     def __str__(self):
         return f'{self.description}'
 
@@ -131,6 +160,19 @@ class Currency:
         self.capacity = capacity
         self.base_capacity = capacity
         self.last_gained = 0
+
+    def copy(self):
+        new_currency = Currency(
+            self.id,
+            self.name,
+            self.capacity
+        )
+
+        new_currency.amount = self.amount
+        new_currency.base_capacity = self.base_capacity
+        new_currency.last_gained = self.last_gained
+
+        return new_currency
 
     def add_amount(self, amount: float):
         current_amount = self.amount
@@ -157,6 +199,22 @@ class Upgrade:
         self.description = description
         self.effects: dict[str, dict[str, Any]] = {}
 
+    def copy(self):
+        new_upgrade = Upgrade(
+            self.id,
+            self.name,
+            self.cost_material,
+            self.cost,
+            self.max_purchases,
+            self.description
+        )
+
+        new_upgrade.unlock_conditions = self.unlock_conditions[:]
+        new_upgrade.unlocks = self.unlocks[:]
+        new_upgrade.effects = self.effects.copy()
+
+        return new_upgrade
+
     def __str__(self):
         return f'{self.name if self.count == 1 else self.name + " x" + str(self.count)}'
 
@@ -182,40 +240,42 @@ class Player:
     def add_skill(self, skill: Skill):
         self.skills[skill.id] = skill
 
-    def buy_upgrade(self, upgrade:  Upgrade):
-        new_upgrade = copy.deepcopy(upgrade)
+    def buy_upgrade(self, upgrade:  Upgrade, count=1):
+        new_upgrade = upgrade.copy()
         material_type = new_upgrade.cost_material
         cost = new_upgrade.cost
 
-        currency = next((c for c in self.currencies.values() if c.name == material_type), None)
+        currency = next((currency for currency in self.currencies.values() if currency.name == material_type), None)
 
-        if currency and currency.amount >= cost:
-            upgrade_added = self.add_upgrade(new_upgrade)
-            if upgrade_added:
-                currency.amount -= cost
+        if currency and currency.amount >= cost * count:
+            if upgrade.id in self.upgrades:
+                owned_upgrade = self.upgrades[upgrade.id]
+                if owned_upgrade.count + count <= owned_upgrade.max_purchases:
+                    self.add_upgrade(new_upgrade, count)
+                    currency.amount -= cost
+            else:
+                if count <= upgrade.max_purchases:
+                    self.add_upgrade(upgrade, count)
+                    currency.amount -= cost
 
     def add_currency(self, currency: Currency):
         currency_id = currency.id
         if currency_id not in self.currencies:
             self.currencies[currency_id] = currency
 
-        self.apply_currency_modifiers()
+    def add_upgrade(self, upgrade:  Upgrade, count=1):
+        if count < 1:
+            return
 
-    def add_upgrade(self, upgrade:  Upgrade, count=1) -> bool:
-        new_upgrade = upgrade
+        new_upgrade = upgrade.copy()
         upgrade_id = new_upgrade.id
         if upgrade_id in self.upgrades:
-            if new_upgrade.max_purchases >= self.upgrades[upgrade_id].count + count:
-                self.upgrades[upgrade_id].count += count
-            else:
-                return False
+            self.upgrades[upgrade_id].count += count
         else:
             new_upgrade.count = count
             self.upgrades[upgrade_id] = new_upgrade
 
-        self.recalculate_stat_modifiers()
         self.update_unlock_conditions()
-        return True
 
     def update_unlock_conditions(self):
         self.unlock_conditions = []
@@ -224,7 +284,7 @@ class Player:
             if upgrade.unlocks:
                 self.unlock_conditions.extend(upgrade.unlocks)
 
-    def recalculate_stat_modifiers(self):
+    def recalculate_modifiers(self):
 
         self.stat_modifiers = {}
 
@@ -243,26 +303,44 @@ class Player:
                     if modifier_type == 'increase':
                         self.stat_modifiers[stat]['increase'] += modifier_value
 
-        self.apply_currency_modifiers()
+    def apply_upgrade_modifiers(self):
+        for upgrade in self.upgrades.values():
+            for key, stat_modifier in self.stat_modifiers.items():
+                if key.startswith(upgrade.name.lower()):
+                    _, attribute = key.split('.')
+
+                    if hasattr(upgrade, attribute):
+                        upgrade_attribute = getattr(upgrade, attribute)
+
+                        new_value = (upgrade_attribute + stat_modifier['increase']) * stat_modifier['multiplier']
+
+                        setattr(upgrade, attribute, new_value)
 
     def apply_energy_modifiers(self):
-        if self.energy:
-            recovery_modifiers = self.stat_modifiers.get('energy.recovery', {'increase': 0, 'multiplier': 1.0})
+        for key, stat_modifier in self.stat_modifiers.items():
+            if key.startswith('energy'):
+                _, attribute = key.split('.')
 
-            self.energy.recovery_rate = (self.energy.base_recovery_rate + recovery_modifiers['increase']) * recovery_modifiers['multiplier']
+                energy = self.energy
+                if hasattr(energy, attribute):
+                    energy_attribute = getattr(energy, attribute)
+
+                    new_value = (energy_attribute + stat_modifier['increase']) * stat_modifier['multiplier']
+
+                    setattr(energy, attribute, new_value)
 
     def apply_currency_modifiers(self):
         for currency in self.currencies.values():
-            if currency.name == 'coins':
-                capacity_modifiers = self.stat_modifiers.get('coins.capacity', {'increase': 0, 'multiplier': 1.0})
+            for key, stat_modifier in self.stat_modifiers.items():
+                if key.startswith(currency.name):
+                    _, attribute = key.split('.')
 
-                new_capacity = (currency.base_capacity + capacity_modifiers['increase']) * capacity_modifiers['multiplier']
+                    if hasattr(currency, attribute):
+                        currency_attribute = getattr(currency, attribute)
 
-                currency.capacity = new_capacity
+                        new_value = (currency_attribute + stat_modifier['increase']) * stat_modifier['multiplier']
 
-    def update_energy(self):
-        self.energy = Energy(self.skills[0].current_level)
-        self.apply_currency_modifiers()
+                        setattr(currency, attribute, new_value)
 
     def change_activity(self, activity: Activity):
         self.update(datetime.now())
@@ -297,7 +375,7 @@ class Player:
             current_activity = self.current_activity
             output_amount = current_activity.output_amount
 
-            player_currency = next((c for c in self.currencies.values() if c.name == current_activity.output_item), None)
+            player_currency = next((currency for currency in self.currencies.values() if currency.name == current_activity.output_item), None)
 
             current_skill_exp = {skill.id: skill.current_exp for skill in self.skills.values()}
 
@@ -357,26 +435,37 @@ class IncrementalGameCog(commands.Cog):
         self.currencies: dict[int, Currency] = {}
         self.views: dict[int, discord.ui.View] = {}
 
+    def get_upgrades(self):
+        return {id: upgrade.copy() for id, upgrade in self.upgrades.items()}
+
+    def get_activities(self):
+        return {id: activity.copy() for id, activity in self.activities.items()}
+
+    def get_skills(self):
+        return {id: skill.copy() for id, skill in self.skills.items()}
+
+    def get_currencies(self):
+        return {id: currency.copy() for id, currency in self.currencies.items()}
+
     # Command to send a message with the button
     @commands.hybrid_command(name='play', with_app_command=True)
     async def play(self, ctx):
         """Interactive play command"""
         user_id = ctx.author.id
         player = await self.get_player(user_id)
+        view = MainMenuView(self, user_id)
 
         if not player:
-            view = MainMenuView(self, user_id)
             view.create_register_menu()
             message = await ctx.send(content="You have not registered yet!", view=view)
             self.views[message.id] = view
         else:
-            view = MainMenuView(self, user_id)
             message = await ctx.send(content='', embed=self.player_stats_embed_message(player), view=view)
             self.views[message.id] = view
 
-    def give_player_energy(self, player: Player):
+    def reset_player_energy_stat(self, player: Player):
         player.energy = Energy(player.skills[0].current_level)
-        player.apply_currency_modifiers()
+        player.apply_energy_modifiers()
 
     async def shop_menu_callback(self, interaction: discord.Interaction):
         user = interaction.user
@@ -608,7 +697,7 @@ class IncrementalGameCog(commands.Cog):
                 for player_activity in player_activities:
                     player_id, activity_id = player_activity
                     player = self.players[player_id]
-                    player.current_activity = self.activities[activity_id]
+                    player.current_activity = self.activities[activity_id].copy()
 
     async def get_player_currencies_from_db(self, player_id):
         await self.get_currencies_from_db()
@@ -623,7 +712,7 @@ class IncrementalGameCog(commands.Cog):
                 for player_currency in player_currencies:
                     player_id, currency_id, amount = player_currency
                     player = self.players[player_id]
-                    currency = self.currencies[currency_id]
+                    currency = self.currencies[currency_id].copy()
                     player.add_currency(currency)
                     currency.add_amount(amount)
 
@@ -640,10 +729,9 @@ class IncrementalGameCog(commands.Cog):
                 for player_skill in player_skills:
                     player_id, skill_id, current_level, current_exp = player_skill
                     player = self.players[player_id]
-                    skill = self.skills[skill_id]
+                    skill = self.skills[skill_id].copy()
                     player.add_skill(skill)
                     skill.add_experience(current_exp)
-                    self.give_player_energy(player)
 
     async def get_player_upgrades_from_db(self, player_id):
         await self.get_upgrades_from_db()
@@ -658,7 +746,7 @@ class IncrementalGameCog(commands.Cog):
                 for player_upgrade in player_upgrades:
                     player_id, upgrade_id, count = player_upgrade
                     player = self.players[player_id]
-                    upgrade = self.upgrades[upgrade_id]
+                    upgrade = self.upgrades[upgrade_id].copy()
                     player.add_upgrade(upgrade, count)
 
     async def get_player_from_db(self, player_id):
@@ -679,6 +767,8 @@ class IncrementalGameCog(commands.Cog):
                     await self.get_player_currencies_from_db(player_id)
                     await self.get_player_activities_from_db(player_id)
                     await self.get_player_skills_from_db(player_id)
+                    self.reset_player_energy_stat(player)
+
                     await self.update_player(player)
                     return player
                 else:
@@ -696,7 +786,30 @@ class IncrementalGameCog(commands.Cog):
             await self.player_to_database_update(player_id)
             return self.players[player_id]
 
+    def recalculate_player_modifiers(self, player: Player):
+
+        # reset currency capacity
+        for currency_id, player_currency in player.currencies.items():
+            baseline_currency = next((currency for currency in self.get_currencies().values() if currency_id == currency.id), None)
+
+            if baseline_currency:
+                player_currency.capacity = baseline_currency.capacity
+
+        # reset upgrade max_purchases
+        for upgrade_id, player_upgrade in player.upgrades.items():
+            baseline_upgrade = next((upgrade for upgrade in self.get_upgrades().values() if upgrade_id == upgrade.id), None)
+
+            if baseline_upgrade:
+                player_upgrade.max_purchases = baseline_upgrade.max_purchases
+
+        self.reset_player_energy_stat(player)
+
+        player.recalculate_modifiers()
+        player.apply_upgrade_modifiers()
+        player.apply_currency_modifiers()
+
     async def update_player(self, player):
+        self.recalculate_player_modifiers(player)
         current_time = datetime.now()
         player.update(current_time)
         await self.player_to_database_update(player.id)
@@ -808,9 +921,9 @@ class IncrementalGameCog(commands.Cog):
 
     async def register_player(self, player_id: str, display_name: str):
         new_player = Player(player_id, display_name)
-        new_player.add_currency(self.currencies[0])
-        new_player.add_skill(self.skills[0])
-        self.give_player_energy(new_player)
+        new_player.add_currency(self.currencies[0].copy())
+        new_player.add_skill(self.skills[0].copy())
+        self.reset_player_energy_stat(new_player)
         self.players[player_id] = new_player
 
         await self.player_to_database_update(player_id)
@@ -901,7 +1014,7 @@ class IncrementalGameCog(commands.Cog):
 
             modified_output = (activity.output_amount + modifiers['increase']) * modifiers['multiplier']
 
-            modified_output_text = f" `+ {(modified_output - activity.output_amount):.2f}` " if modified_output - activity.output_amount > 0 else ''
+            modified_output_text = f" `+{(modified_output - activity.output_amount):.2f}` " if modified_output - activity.output_amount > 0 else ''
 
             requirements_text = f"\n• Requirements: `{'`, `'.join(activity.unlock_conditions)}`\n" if activity.unlock_conditions else ''
 
@@ -962,15 +1075,15 @@ class IncrementalGameCog(commands.Cog):
 
     def get_missing_upgrades(self, player) -> list[tuple[Upgrade, int]]:
         missing_upgrades = []
-        upgrades_list = copy.deepcopy(self.upgrades)
+        upgrades_list = self.get_upgrades()
         for id, upgrade in upgrades_list.items():
             if id in player.upgrades:
-                upgrades_left = upgrade.max_purchases - player.upgrades[id].count
+                upgrades_left = player.upgrades[id].max_purchases - player.upgrades[id].count
             else:
                 upgrades_left = upgrade.max_purchases
 
             if upgrades_left > 0:
-                missing_upgrades.append((upgrade, upgrades_left))
+                missing_upgrades.append((upgrade, int(upgrades_left)))
 
         return missing_upgrades
 

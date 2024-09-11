@@ -46,5 +46,21 @@
                 "modifier_value": 0.1
             }
         }
+    },
+    {
+        "id": "3",
+        "name": "Shape up!",
+        "cost_material": "coins",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlock_conditions": [],
+        "unlocks": [],
+        "description": "No description",
+        "effects": {
+            "pouch.max_purchases": {
+                "modifier_type": "increase",
+                "modifier_value": 2
+            }
+        }
     }
 ]
