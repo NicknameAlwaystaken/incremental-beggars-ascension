@@ -1,0 +1,22 @@
+[
+    {
+        "id": 0,
+        "name": "Stamina",
+        "description": "Increases stamina capacity.",
+        "start_level": 5,
+        "max_level": 30,
+        "base_exp_requirement": 500,
+        "scaling_factor": 2.2,
+        "exp_formula": "base_exp * (scaling_factor ^ (current_level - start_level))"
+    },
+    {
+        "id": 1,
+        "name": "Some other skill",
+        "description": "No description",
+        "start_level": 1,
+        "max_level": 50,
+        "base_exp_requirement": 50,
+        "scaling_factor": 1.5,
+        "exp_formula": "base_exp * (scaling_factor ^ (level - 1))"
+    }
+]
