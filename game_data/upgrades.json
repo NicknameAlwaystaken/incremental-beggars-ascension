@@ -54,10 +54,26 @@
         "cost": 20,
         "max_purchases": 1,
         "unlock_conditions": [],
-        "unlocks": [],
+        "unlocks": ["manual labour"],
         "description": "No description",
         "effects": {
             "pouch.max_purchases": {
+                "modifier_type": "increase",
+                "modifier_value": 2
+            }
+        }
+    },
+    {
+        "id": "4",
+        "name": "Bigger Pouches",
+        "cost_material": "coins",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlock_conditions": [],
+        "unlocks": [],
+        "description": "No description",
+        "effects": {
+            "pouch.effects": {
                 "modifier_type": "increase",
                 "modifier_value": 2
             }

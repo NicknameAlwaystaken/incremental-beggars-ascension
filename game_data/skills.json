@@ -2,7 +2,7 @@
     {
         "id": 0,
         "name": "Stamina",
-        "description": "Increases stamina capacity.",
+        "description": "Increases energy capacity.",
         "start_level": 5,
         "max_level": 30,
         "base_exp_requirement": 500,
