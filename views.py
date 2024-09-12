@@ -11,8 +11,8 @@ class BaseView(discord.ui.View):
     def is_owner(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
-    def add_back_button(self, callback):
-        back_button = discord.ui.Button(label='Back', style=discord.ButtonStyle.secondary)
+    def add_back_button(self, callback, row=1):
+        back_button = discord.ui.Button(label='Back', style=discord.ButtonStyle.primary, row=row)
         back_button.callback = callback
         self.add_item(back_button)
 
@@ -69,8 +69,8 @@ class ShopMenuView(BaseView):
             self.add_item(buy_button)
 
         # Back and Update buttons
-        self.add_back_button(self.cog.main_menu_callback)
         self.add_update_button(self.cog.shop_menu_callback)
+        self.add_back_button(self.cog.main_menu_callback)
 
 
 class ActivitiesMenuView(BaseView):
@@ -81,11 +81,6 @@ class ActivitiesMenuView(BaseView):
     def create_activities_menu(self, player):
         self.clear_items()
 
-        if player.current_activity:
-            stop_activity_button = discord.ui.Button(label=f'Stop', style=discord.ButtonStyle.danger)
-            stop_activity_button.callback = partial(self.cog.start_activity_callback, activity=None)
-            self.add_item(stop_activity_button)
-
         activities = self.cog.get_available_activities(player)
 
         for activity in activities:
@@ -94,7 +89,16 @@ class ActivitiesMenuView(BaseView):
             activity_button.callback = partial(self.cog.start_activity_callback, activity=activity)
             self.add_item(activity_button)
 
+        if player.current_activity:
+            stop_button_style = discord.ButtonStyle.danger
+        else:
+            stop_button_style = discord.ButtonStyle.secondary
+
+        stop_activity_button = discord.ui.Button(label=f'Stop', style=stop_button_style)
+        stop_activity_button.callback = partial(self.cog.start_activity_callback, activity=None)
+        self.add_item(stop_activity_button)
+
         # Back and Update buttons
-        self.add_back_button(self.cog.main_menu_callback)
         self.add_update_button(self.cog.activities_menu_callback)
+        self.add_back_button(self.cog.main_menu_callback)
 

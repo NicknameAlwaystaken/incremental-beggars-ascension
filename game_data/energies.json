@@ -1,0 +1,8 @@
+[
+    {
+        "id": 0,
+        "name": "energy",
+        "max_energy": 5,
+        "recovery_rate": 0.2
+    }
+]

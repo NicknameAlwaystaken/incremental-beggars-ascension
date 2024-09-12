@@ -4,7 +4,8 @@
         "name": "Beg",
         "icon": "🙏",
         "output_item": "coins",
-        "output_amount": 0.2,
+        "output_amount": 0.1,
+        "energy_type": "energy",
         "energy_drain_rate": 0.1,
         "unlock_conditions": [],
         "description": "Beg for coins on the streets.",
@@ -15,10 +16,35 @@
         "name": "Rob Beggars",
         "icon": "🦹",
         "output_item": "coins",
-        "output_amount": 0.3,
+        "output_amount": 0.2,
+        "energy_type": "energy",
         "energy_drain_rate": 0.1,
         "unlock_conditions": ["pickpocketing"],
         "description": "Rob beggars on the streets.",
         "status_description": "You are robbing beggars for coins."
+    },
+    {
+        "id": 2,
+        "name": "Clean Stables",
+        "icon": "",
+        "output_item": "coins",
+        "output_amount": 0.2,
+        "energy_type": "energy",
+        "energy_drain_rate": 0.5,
+        "unlock_conditions": ["manual labour"],
+        "description": "Clean up after animals.",
+        "status_description": "Scrubbing nasty things."
+    },
+    {
+        "id": 3,
+        "name": "Cheat for testing",
+        "icon": "",
+        "output_item": "coins",
+        "output_amount": 5,
+        "energy_type": "energy",
+        "energy_drain_rate": 1,
+        "unlock_conditions": [],
+        "description": "Cheat for testing",
+        "status_description": "CHEATING OMG!!!!."
     }
 ]
