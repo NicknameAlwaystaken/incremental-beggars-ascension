@@ -4,10 +4,10 @@
         "name": "Pouch",
         "cost_material": "coins",
         "cost": 10,
-        "max_purchases": 3,
+        "max_purchases": 5,
         "unlock_conditions": [],
         "unlocks": [],
-        "description": "No description",
+        "description": "For each stamina level you can buy another",
         "effects": {
             "coins.capacity": {
                 "modifier_type": "increase",
@@ -22,12 +22,12 @@
         "cost": 20,
         "max_purchases": 1,
         "unlock_conditions": [],
-        "unlocks": ["pickpocketing"],
+        "unlocks": ["thieving"],
         "description": "No description",
         "effects": {
             "coins.gain": {
                 "modifier_type": "multiplier",
-                "modifier_value": 1.5
+                "modifier_value": 1.1
             }
         }
     },
@@ -41,7 +41,7 @@
         "unlocks": [],
         "description": "No description",
         "effects": {
-            "energy.recovery": {
+            "energy.recovery_rate": {
                 "modifier_type": "increase",
                 "modifier_value": 0.1
             }
@@ -67,7 +67,7 @@
         "id": "4",
         "name": "Bigger Pouches",
         "cost_material": "coins",
-        "cost": 20,
+        "cost": 30,
         "max_purchases": 1,
         "unlock_conditions": [],
         "unlocks": [],
@@ -76,6 +76,114 @@
             "pouch.effects": {
                 "modifier_type": "increase",
                 "modifier_value": 2
+            }
+        }
+    },
+    {
+        "id": "5",
+        "name": "Fishing contract",
+        "cost_material": "coins",
+        "cost": 30,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.fishing.3"],
+        "unlocks": [],
+        "description": "Form a contract with local merchants to give passive coins gain.",
+        "effects": {
+            "coins.currency_passive_gain": {
+                "modifier_type": "increase",
+                "modifier_value": 0.05
+            }
+        }
+    },
+    {
+        "id": "6",
+        "name": "Stick with a string",
+        "cost_material": "coins",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlock_conditions": [],
+        "unlocks": ["fishing"],
+        "description": "If I just find a hook for this, I can probably fish?",
+        "effects": {
+        }
+    },
+    {
+        "id": "7",
+        "name": "Fisher's Stamina",
+        "cost_material": "coins",
+        "cost": 50,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.fishing.5"],
+        "unlocks": [],
+        "description": "I am feeling pretty tough.",
+        "effects": {
+            "energy.energy_passive_recovery": {
+                "modifier_type": "increase",
+                "modifier_value": 0.05
+            }
+        }
+    },
+    {
+        "id": "8",
+        "name": "Pots as stash",
+        "cost_material": "coins",
+        "cost": 30,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.farming.3"],
+        "unlocks": [],
+        "description": "Maybe this is better use for pots I have.",
+        "effects": {
+            "coins.capacity": {
+                "modifier_type": "increase",
+                "modifier_value": 10
+            }
+        }
+    },
+    {
+        "id": "9",
+        "name": "Pot for plants",
+        "cost_material": "coins",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlock_conditions": [],
+        "unlocks": ["farming"],
+        "description": "No description",
+        "effects": {
+        }
+    },
+    {
+        "id": "10",
+        "name": "Flower's scent",
+        "cost_material": "coins",
+        "cost": 50,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.farming.5"],
+        "unlocks": [],
+        "description": "Nice scent of flower while you sleep.",
+        "effects": {
+            "energy.recovery_rate": {
+                "modifier_type": "increase",
+                "modifier_value": 0.2
+            }
+        }
+    },
+    {
+        "id": "11",
+        "name": "Kleptomania",
+        "cost_material": "coins",
+        "cost": 200,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.thieving.10"],
+        "unlocks": [],
+        "description": "Can't stop, won't stop!",
+        "effects": {
+            "coins.currency_passive_gain": {
+                "modifier_type": "increase",
+                "modifier_value": 0.5
+            },
+            "thieving.exp_passive_gain": {
+                "modifier_type": "increase",
+                "modifier_value": 0.5
             }
         }
     }
