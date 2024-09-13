@@ -16,9 +16,15 @@ game_data_folder = 'game_data'
 
 GAME_DB_LOCATION = os.path.join(game_data_folder, 'game.db')
 
+SERVER_DB_LOCATION = os.path.join(game_data_folder, 'server.db')
+
 MAX_MESSAGE_LENGTH = 2000
 
 GAME_NAME = "Beggar's Ascension"
+
+ACTIVITIES_PER_PAGE = 5
+
+UPGRADES_PER_PAGE = 4
 
 
 class Energy:
@@ -30,6 +36,7 @@ class Energy:
         self.current_energy = max_energy
         self.recovery_rate = recovery_rate
         self.base_recovery_rate = recovery_rate
+        self.energy_passive_recovery = 0
         self.recovering = False
 
     def copy(self):
@@ -45,7 +52,12 @@ class Energy:
     def is_not_full(self):
         return self.max_energy > self.current_energy
 
+    def passive_recovery(self, seconds):
+        if self.energy_passive_recovery > 0:
+            self.current_energy = min((self.energy_passive_recovery * seconds), self.max_energy)
+
     def recover(self, seconds):
+        self.passive_recovery(seconds)
         recover_amount = seconds * self.recovery_rate
         start_energy = self.current_energy
 
@@ -88,7 +100,9 @@ class Skill:
         self.start_level = start_level
         self.current_level = start_level
         self.current_exp = current_exp
+        self.exp_passive_gain = 0
         self.last_gained = 0
+        self.effects: dict[str, dict[str, Any]] = {}
 
     def copy(self):
         new_skill = Skill(
@@ -102,6 +116,8 @@ class Skill:
             start_level=self.start_level,
             current_exp=self.current_exp
         )
+
+        new_skill.effects = self.effects.copy()
 
         return new_skill
 
@@ -125,6 +141,10 @@ class Skill:
 
         return levelled_up
 
+    def passive_gain(self, seconds):
+        if self.exp_passive_gain > 0:
+            self.add_experience(self.exp_passive_gain * seconds)
+
     def __str__(self):
         last_gained_text = f' (+{format_number(self.last_gained)})' if self.last_gained > 0 else ''
         return f'{self.name}: Level {self.current_level}/{self.max_level} - Exp: {format_number(self.current_exp)}/{format_number(self.exp_required_for_next_level())}' \
@@ -136,6 +156,8 @@ class Activity:
                  output_item: str, output_amount: float,
                  energy_type: str,
                  energy_drain_rate: float,
+                 skill: Optional[Skill],
+                 skill_exp_rate: float,
                  unlock_conditions: list[str], description: str,
                  status_description: str):
         self.id = id
@@ -145,6 +167,8 @@ class Activity:
         self.output_amount = output_amount
         self.energy_type = energy_type
         self.energy_drain_rate = energy_drain_rate
+        self.skill = skill
+        self.skill_exp_rate = skill_exp_rate
         self.unlock_conditions = unlock_conditions
         self.description = description
         self.status_description = status_description
@@ -158,6 +182,8 @@ class Activity:
             output_amount=self.output_amount,
             energy_type=self.energy_type,
             energy_drain_rate=self.energy_drain_rate,
+            skill=self.skill,
+            skill_exp_rate=self.skill_exp_rate,
             unlock_conditions=self.unlock_conditions[:],
             description=self.description,
             status_description=self.status_description
@@ -177,6 +203,7 @@ class Currency:
         self.capacity = capacity
         self.base_capacity = capacity
         self.last_gained = 0
+        self.currency_passive_gain = 0
 
     def copy(self):
         new_currency = Currency(
@@ -199,6 +226,10 @@ class Currency:
         self.amount += amount
         self.amount = min(self.amount, self.capacity)
         self.last_gained = self.amount - current_amount
+
+    def passive_gain(self, seconds):
+        if self.currency_passive_gain > 0:
+            self.add_amount(seconds * self.currency_passive_gain)
 
     def __str__(self):
         return f"{self.name}: {format_number(self.amount)}/{format_number(self.capacity)} " \
@@ -236,12 +267,12 @@ class Upgrade:
         return new_upgrade
 
     def __str__(self):
-        return f'{self.name if self.count == 1 else self.name + " x" + str(self.count)}'
+        return f'{self.name if self.count == 1 else self.name + " __x" + str(self.count) + "__"}'
 
 
 class Player:
-    def __init__(self, player_id: str, display_name: str):
-        self.id: str = player_id
+    def __init__(self, player_id: int, display_name: str):
+        self.id = player_id
         self.title = 'Beggar'
         self.display_name = display_name
         self.currencies: dict[int, Currency] = {}
@@ -253,6 +284,7 @@ class Player:
         self.last_update_time = datetime.now()
         self.current_activity: Optional[Activity] = None
         self.time_since_last_update = 0
+        self.start_date = datetime.now()
 
     def add_skill(self, skill: Skill):
         self.skills[skill.id] = skill
@@ -307,7 +339,6 @@ class Player:
                 self.unlock_conditions.extend(upgrade.unlocks)
 
     def recalculate_modifiers(self):
-
         self.stat_modifiers = {}
 
         priority_upgrades = [
@@ -331,6 +362,24 @@ class Player:
                         self.stat_modifiers[stat]['increase'] += modifier_value
 
         self.apply_upgrade_modifiers()
+
+        # Skills improving upgrades
+        for skill in self.skills.values():
+            for stat, effect in skill.effects.items():
+                modifier_type = effect['modifier_type']
+                modifier_value = effect['modifier_value']
+
+                effect_count = skill.current_level - skill.start_level
+
+                for _ in range(effect_count):
+                    if stat not in self.stat_modifiers:
+                        self.stat_modifiers[stat] = {'increase': 0, 'multiplier': 1.0}
+
+                    if modifier_type == 'multiplier':
+                        self.stat_modifiers[stat]['multiplier'] *= modifier_value
+
+                    if modifier_type == 'increase':
+                        self.stat_modifiers[stat]['increase'] += modifier_value
 
         for upgrade in self.upgrades.values():
             if upgrade not in priority_upgrades:
@@ -432,31 +481,38 @@ class Player:
         base_energy = self.energies[0]
         stamina_level = self.skills[0].current_level
 
+        current_skills_exp = {skill.id: skill.current_exp for skill in self.skills.values()}
+
+        current_currencies_amount = {currency.id: currency.amount for currency in self.currencies.values()}
+
+        for currency in self.currencies.values():
+            currency.passive_gain(activity_steps)
+
+        for skill in self.skills.values():
+            skill.passive_gain(activity_steps)
+
         if self.current_activity:
             current_activity = self.current_activity
             output_amount = current_activity.output_amount
 
             player_currency = next((currency for currency in self.currencies.values() if currency.name == current_activity.output_item), None)
 
-            player_energy = next((energy for energy in self.energies.values()), None)
+            player_energy = next((energy for energy in self.energies.values() if current_activity.energy_type.lower() == energy.name.lower()), None)
+
+            activity_skill = next((skill for skill in self.skills.values() if current_activity.skill and current_activity.skill.name.lower() == skill.name.lower()), current_activity.skill)
 
             if not player_energy:
                 return
 
-            currency_amount = 0
-            if player_currency:
-                currency_amount = player_currency.amount
-
-            current_skill_exp = {skill.id: skill.current_exp for skill in self.skills.values()}
-
             while activity_steps > 0:
-
                 if activity_steps < min_activity_step:
                     break
 
                 if player_energy.recovering:
                     activity_steps -= self.recover_energy(player_energy, activity_steps)
                 else:
+                    for energy in self.energies.values():
+                        energy.passive_recovery(activity_steps)
                     energy_to_use = min(player_energy.current_energy, activity_steps * current_activity.energy_drain_rate)
 
                     activity_count = energy_to_use / current_activity.energy_drain_rate
@@ -466,6 +522,13 @@ class Player:
 
                     self.deplete_energy(player_energy, energy_to_use)
 
+                    if activity_skill:
+                        if activity_skill.id not in self.skills:
+                            self.skills[activity_skill.id] = activity_skill.copy()
+                            activity_skill = self.skills[activity_skill.id]
+
+                        activity_skill.add_experience(current_activity.skill_exp_rate * activity_count)
+
                     if player_currency:
                         if player_currency.name in self.stat_modifiers:
                             currency_modifier = self.stat_modifiers[player_currency.name]
@@ -473,21 +536,24 @@ class Player:
 
                         player_currency.add_amount(amount_to_add)
 
-            # Check how much skill exp gained
-            for skill_id, skill in self.skills.items():
-                if skill_id in current_skill_exp.keys():
-                    if skill.current_exp > current_skill_exp[skill_id]:
-                        skill.last_gained = skill.current_exp - current_skill_exp[skill_id]
-                else:
-                    skill.last_gained = skill.current_exp
-
-            # Check how much currency gained
-            if player_currency:
-                player_currency.last_gained = player_currency.amount - currency_amount
-
         # Recover energy if it's not idle and not full
         elif not self.current_activity and base_energy.is_not_full():
             self.recover_energy(base_energy, activity_steps)
+
+        # Check how much currency gained
+        for currency_id, currency in self.currencies.items():
+            if currency_id in current_currencies_amount.keys():
+                if currency.amount != current_currencies_amount[currency_id]:
+                    currency.last_gained = currency.amount - current_currencies_amount[currency_id]
+            else:
+                currency.last_gained = currency.amount
+
+        # Check how much skill exp gained
+        for skill_id, skill in self.skills.items():
+            if skill_id in current_skills_exp.keys():
+                skill.last_gained = skill.current_exp - current_skills_exp[skill_id]
+            else:
+                skill.last_gained = skill.current_exp
 
         new_stamina_level = self.skills[0].current_level
         if stamina_level < new_stamina_level:
@@ -504,18 +570,25 @@ class Player:
             f'{upgrades if self.upgrades else ''}'
 
 
+class WrongChannelError(commands.CheckFailure):
+    pass
+
+
 class IncrementalGameCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.players: dict[str, Player] = {}
+        self.players: dict[int, Player] = {}
         self.upgrades: dict[int,  Upgrade] = {}
         self.activities: dict[int, Activity] = {}
         self.skills: dict[int, Skill] = {}
         self.energies: dict[int, Energy] = {}
         self.currencies: dict[int, Currency] = {}
         self.views: dict[int, discord.ui.View] = {}
+        self.allowed_channels = {}
 
         self.initialized = False
+
+        self.play = commands.check(self.is_allowed_channel)(self.play)
 
     def initialize(self):
         self.initialized = True
@@ -535,6 +608,98 @@ class IncrementalGameCog(commands.Cog):
     def get_currencies(self):
         return {id: currency.copy() for id, currency in self.currencies.items()}
 
+    async def is_allowed_channel(self, ctx):
+        server_id = ctx.guild.id
+        channel_id = ctx.channel.id
+
+        is_allowed = server_id in self.allowed_channels and any(channel["id"] == channel_id for channel in self.allowed_channels[server_id]["channels"])
+
+        if not is_allowed:
+            # Raise a specific error if the check fails due to channel restrictions
+            raise WrongChannelError("You cannot use this command in this channel. Please use it in an allowed channel.")
+
+        return True
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error):
+        if isinstance(error, WrongChannelError):
+            await ctx.send("You cannot use this command in this channel. Please use it in an allowed channel.", ephemeral=True)
+
+        elif isinstance(error, commands.CheckFailure):
+            await ctx.send("You don't have permissions to use this command.", ephemeral=True)
+        else:
+            raise error
+
+    # Command to send a message with the button
+    @commands.hybrid_command(name='add_channel', with_app_command=True)
+    async def add_channel(self, ctx):
+        """Add this channel for this bot"""
+        if not self.initialized:
+            print("Not done initializing!")
+            return
+
+        channel_id = ctx.channel.id
+        server_id = ctx.guild.id
+
+        if server_id not in self.allowed_channels:
+            self.allowed_channels[server_id] = {"name": ctx.guild.name, "channels": []}
+
+        self.allowed_channels[server_id]["channels"].append({"id": channel_id, "name": ctx.channel.name})
+
+        print(self.allowed_channels)
+
+        await self.save_channels_to_db()
+
+    @commands.command(name='levelup')
+    async def levelup(self, ctx, *args):
+        if not self.initialized:
+            print("Not done initializing!")
+            return
+
+        if len(args) != 1:
+            return
+
+        skill_name = args[0]
+
+        user_id = ctx.author.id
+        player = await self.get_player(user_id)
+
+        skill = next((skill for skill in self.get_skills().values() if skill.name.lower() == skill_name.lower()), None)
+
+        if player and skill:
+            if skill.id not in player.skills:
+                player.skills[skill.id] = skill
+            else:
+                skill = player.skills[skill.id]
+
+            skill.add_experience(skill.exp_required_for_next_level() - skill.current_exp)
+            await self.update_player(player)
+
+    @commands.command(name='addexp')
+    async def addexp(self, ctx, *args):
+        if not self.initialized:
+            print("Not done initializing!")
+            return
+
+        if len(args) != 2:
+            return
+
+        skill_name, experience_amount = args
+
+        user_id = ctx.author.id
+        player = await self.get_player(user_id)
+
+        skill = next((skill for skill in self.get_skills().values() if skill.name.lower() == skill_name.lower()), None)
+
+        if player and skill:
+            if skill.id not in player.skills:
+                player.skills[skill.id] = skill
+            else:
+                skill = player.skills[skill.id]
+
+            skill.add_experience(int(experience_amount))
+            await self.update_player(player)
+
     # Command to send a message with the button
     @commands.hybrid_command(name='play', with_app_command=True)
     async def play(self, ctx):
@@ -549,30 +714,36 @@ class IncrementalGameCog(commands.Cog):
 
         if not player:
             view.create_register_menu()
-            message = await ctx.send(content="You have not registered yet!", view=view)
+            register_message = "You have not registered yet!" \
+                "\nGame offers content up to **level 10** of skills."\
+                "\n**WARNING** Game is still in development so your progress"\
+                " will be reset until full version release!"
+            message = await ctx.send(content=register_message, view=view)
             self.views[message.id] = view
         else:
             await self.update_player(player)
             message = await ctx.send(content='', embed=self.player_stats_embed_message(player), view=view)
             self.views[message.id] = view
 
-    async def shop_menu_callback(self, interaction: discord.Interaction):
+    async def shop_menu_callback(self, interaction: discord.Interaction, page=1):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(str(user.id))
+        player = await self.get_player(user.id)
         if player:
             await self.update_player(player)
-            view = ShopMenuView(self, user.id, player)
-            await interaction.response.edit_message(content='', embed=self.player_shop_embed_message(player), view=view)
+            if page < 1:
+                page = 1
+            view = ShopMenuView(self, user.id, player, UPGRADES_PER_PAGE, page)
+            await interaction.response.edit_message(content='', embed=self.player_shop_embed_message(player, page), view=view)
 
     async def update_callback(self, interaction: discord.Interaction):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(str(user.id))
+        player = await self.get_player(user.id)
         if player:
             await self.update_player(player)
 
@@ -581,61 +752,63 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(str(user.id))
+        player = await self.get_player(user.id)
         if player:
             await self.update_player(player)
             view = MainMenuView(self, user.id)
             await interaction.response.edit_message(content='', embed=self.player_stats_embed_message(player), view=view)
 
-    async def activities_menu_callback(self, interaction: discord.Interaction):
+    async def activities_menu_callback(self, interaction: discord.Interaction, page=1):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(str(user.id))
+        player = await self.get_player(user.id)
         if player:
             await self.update_player(player)
-            view = ActivitiesMenuView(self, user.id, player)
-            await interaction.response.edit_message(content='', embed=self.player_activities_embed_message(player), view=view)
+            if page < 1:
+                page = 1
+            view = ActivitiesMenuView(self, user.id, player, ACTIVITIES_PER_PAGE, page)
+            await interaction.response.edit_message(content='', embed=self.player_activities_embed_message(player, page), view=view)
 
-    async def buy_upgrade_callback(self, interaction: discord.Interaction, upgrade:  Upgrade):
+    async def buy_upgrade_callback(self, interaction: discord.Interaction, upgrade: Upgrade, page=1):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(str(user.id))
+        player = await self.get_player(user.id)
 
         if player:
             player.buy_upgrade(upgrade)
             self.recalculate_player_modifiers(player)
             await self.update_player(player)
-            view = ShopMenuView(self, user.id, player)
-            await interaction.response.edit_message(content='', embed=self.player_shop_embed_message(player), view=view)
+            view = ShopMenuView(self, user.id, player, UPGRADES_PER_PAGE, page)
+            await interaction.response.edit_message(content='', embed=self.player_shop_embed_message(player, page), view=view)
 
-    async def start_activity_callback(self, interaction: discord.Interaction, activity: Activity):
+    async def start_activity_callback(self, interaction: discord.Interaction, activity: Activity, page=1):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(str(user.id))
+        player = await self.get_player(user.id)
 
         if player:
             player.change_activity(activity)
             await self.update_player(player)
-            view = ActivitiesMenuView(self, user.id, player)
-            await interaction.response.edit_message(content='', embed=self.player_activities_embed_message(player), view=view)
+            view = ActivitiesMenuView(self, user.id, player, ACTIVITIES_PER_PAGE, page)
+            await interaction.response.edit_message(content='', embed=self.player_activities_embed_message(player, page), view=view)
 
     async def register_callback(self, interaction: discord.Interaction):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(str(user.id))
+        player = await self.get_player(int(user.id))
 
         if not player:
             # Register the player and update the message
-            await self.register_player(str(user.id), user.display_name)
-            player = await self.get_player(str(user.id))
+            await self.register_player(int(user.id), user.display_name)
+            player = await self.get_player(int(user.id))
             await self.update_player(player)
             view = MainMenuView(self, user.id)
             await interaction.response.edit_message(content='', embed=self.player_stats_embed_message(player), view=view)
@@ -646,6 +819,31 @@ class IncrementalGameCog(commands.Cog):
         if view and not view.is_owner(interaction):
             return False
         return True
+
+    async def get_server_channels_from_db(self):
+        async with aiosqlite.connect(SERVER_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT server_id, server_name
+            FROM servers''') as cursor:
+
+                servers = await cursor.fetchall()
+
+                self.allowed_channels = {}
+                for (server_id, server_name) in servers:
+                    self.allowed_channels[server_id] = {"name": server_name, "channels": []}
+
+            async with db.execute('''
+            SELECT channel_id, server_id, channel_name
+            FROM channels''') as cursor:
+
+                channels = await cursor.fetchall()
+
+                for (channel_id, server_id, channel_name) in channels:
+                    if server_id in self.allowed_channels:
+                        self.allowed_channels[server_id]["channels"].append({
+                            "id": channel_id,
+                            "name": channel_name
+                        })
 
     async def get_energies_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -696,17 +894,37 @@ class IncrementalGameCog(commands.Cog):
                             exp_formula=skill[7]
                         )
 
+            # Fetch the effects from the skill_effects table
+            async with db.execute('''
+            SELECT skill_id, stat, modifier_type, modifier_value
+            FROM skill_effects''') as cursor:
+
+                effects = await cursor.fetchall()
+
+                for effect in effects:
+                    skill_id = effect[0]
+                    stat = effect[1]
+                    modifier_type = effect[2]
+                    modifier_value = effect[3]
+
+                    if skill_id in self.skills:
+                        self.skills[skill_id].effects[stat] = {
+                            'modifier_type': modifier_type,
+                            'modifier_value': modifier_value
+                        }
+
     async def get_activities_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             async with db.execute('''
-            SELECT activity_id, name, icon, output_item, output_amount, energy_type, energy_drain_rate, unlock_conditions, description, status_description
+            SELECT activity_id, name, icon, output_item, output_amount, energy_type, energy_drain_rate, skill, skill_exp_rate, unlock_conditions, description, status_description
             FROM activities''') as cursor:
 
                 activities = await cursor.fetchall()
 
                 self.activities = {}
                 for activity in activities:
-                    unlock_conditions = activity[7]
+                    skill = next((skill.copy() for skill in self.get_skills().values() if activity[7].lower() == skill.name.lower()), None)
+                    unlock_conditions = activity[9]
                     if unlock_conditions is None or unlock_conditions == "":
                         unlock_conditions = []
                     else:
@@ -720,9 +938,11 @@ class IncrementalGameCog(commands.Cog):
                             output_amount=activity[4],
                             energy_type=activity[5],
                             energy_drain_rate=activity[6],
+                            skill=skill,
+                            skill_exp_rate=activity[8],
                             unlock_conditions=unlock_conditions,
-                            description=activity[8],
-                            status_description=activity[9]
+                            description=activity[10],
+                            status_description=activity[11]
                         )
 
     async def get_upgrades_from_db(self):
@@ -734,8 +954,9 @@ class IncrementalGameCog(commands.Cog):
                 upgrades = await cursor.fetchall()
 
                 self.upgrades = {}
-                for upgrade in upgrades:
-                    self.upgrades[upgrade[0]] = Upgrade(
+                unordered_upgrades = {}
+                for upgrade in sorted(upgrades, key=lambda x: x[3]):
+                    unordered_upgrades[upgrade[0]] = Upgrade(
                         id=upgrade[0],
                         name=upgrade[1],
                         cost_material=upgrade[2],
@@ -743,6 +964,8 @@ class IncrementalGameCog(commands.Cog):
                         max_purchases=upgrade[4],
                         description=upgrade[5]
                     )
+
+                self.upgrades = deepcopy(unordered_upgrades)
 
             # Fetch the effects from the upgrade_effects table
             async with db.execute('''
@@ -801,7 +1024,7 @@ class IncrementalGameCog(commands.Cog):
 
                 for player_activity in player_activities:
                     player_id, activity_id = player_activity
-                    player = self.players[player_id]
+                    player = self.players[int(player_id)]
                     player.current_activity = self.activities[activity_id].copy()
 
     async def get_player_energies_from_db(self, player_id):
@@ -816,7 +1039,7 @@ class IncrementalGameCog(commands.Cog):
 
                 for player_energy in player_energies:
                     player_id, energy_id, current_amount = player_energy
-                    player = self.players[player_id]
+                    player = self.players[int(player_id)]
                     energy = self.energies[energy_id].copy()
                     player.add_energy(energy)
                     energy.current_energy = current_amount
@@ -833,7 +1056,7 @@ class IncrementalGameCog(commands.Cog):
 
                 for player_currency in player_currencies:
                     player_id, currency_id, amount = player_currency
-                    player = self.players[player_id]
+                    player = self.players[int(player_id)]
                     currency = self.currencies[currency_id].copy()
                     player.add_currency(currency)
                     currency.set_amount(amount)
@@ -849,8 +1072,8 @@ class IncrementalGameCog(commands.Cog):
                 player_skills = await cursor.fetchall()
 
                 for player_skill in player_skills:
-                    player_id, skill_id, current_level, current_exp = player_skill
-                    player = self.players[player_id]
+                    player_id, skill_id, _, current_exp = player_skill
+                    player = self.players[int(player_id)]
                     skill = self.skills[skill_id].copy()
                     player.add_skill(skill)
                     skill.add_experience(current_exp)
@@ -867,28 +1090,29 @@ class IncrementalGameCog(commands.Cog):
 
                 for player_upgrade in player_upgrades:
                     player_id, upgrade_id, count = player_upgrade
-                    player = self.players[player_id]
+                    player = self.players[int(player_id)]
                     upgrade = self.upgrades[upgrade_id].copy()
                     player.add_upgrade(upgrade, count)
 
     async def get_player_from_db(self, player_id):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             async with db.execute('''
-            SELECT player_id, player_display_name, last_update_time
+            SELECT player_id, player_display_name, start_date, last_update_time
             FROM players
             WHERE player_id = ?''', (player_id,)) as cursor:
 
                 found_player = await cursor.fetchone()
 
                 if found_player:
-                    player_id, display_name, last_update_time = found_player
+                    player_id, display_name, start_date, last_update_time = found_player
                     player = Player(player_id, display_name)
                     player.last_update_time = datetime.fromisoformat(last_update_time)
-                    self.players[player_id] = player
+                    player.start_date = datetime.fromisoformat(start_date)
+                    self.players[int(player_id)] = player
                     await self.get_player_upgrades_from_db(player_id)
                     await self.get_player_currencies_from_db(player_id)
-                    await self.get_player_activities_from_db(player_id)
                     await self.get_player_skills_from_db(player_id)
+                    await self.get_player_activities_from_db(player_id)
                     await self.get_player_energies_from_db(player_id)
                     self.recalculate_player_modifiers(player)
 
@@ -897,17 +1121,17 @@ class IncrementalGameCog(commands.Cog):
                 else:
                     return None
 
-    async def get_player(self, player_id: str):
+    async def get_player(self, player_id: int):
         if player_id not in self.players:
             player = await self.get_player_from_db(player_id)
             if player:
-                self.players[player_id] = player
+                self.players[int(player_id)] = player
                 return player
             else:
                 return None
         else:
             await self.player_to_database_update(player_id)
-            return self.players[player_id]
+            return self.players[int(player_id)]
 
     def recalculate_player_modifiers(self, player: Player):
 
@@ -932,19 +1156,16 @@ class IncrementalGameCog(commands.Cog):
         player.apply_energy_modifiers()
 
     async def update_player(self, player):
-        skill_levels = [skill.current_level for skill in player.skills.values()]
         current_time = datetime.now()
         player.update(current_time)
-        after_update_skills = [skill.current_level for skill in player.skills.values()]
 
-        if skill_levels != after_update_skills:
-            self.recalculate_player_modifiers(player)
+        self.recalculate_player_modifiers(player)
 
         await self.player_to_database_update(player.id)
 
     async def player_to_database_update(self, player_id):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
-            player = self.players[player_id]
+            player = self.players[int(player_id)]
             player_upgrades = [(id, upgrade.count) for id, upgrade in player.upgrades.items()]
             player_currencies = [(id, currency.amount) for id, currency in player.currencies.items()]
             player_activity = player.current_activity
@@ -955,8 +1176,8 @@ class IncrementalGameCog(commands.Cog):
 
             await self.update_player_upgrades(db, player_id, player_upgrades)
             await self.update_player_currencies(db, player_id, player_currencies)
-            await self.update_player_activities(db, player_id, player_activity)
             await self.update_player_skills(db, player_id, player_skills)
+            await self.update_player_activities(db, player_id, player_activity)
             await self.update_player_energies(db, player_id, player_energies)
             await self.update_player_data(db, player_id, player)
 
@@ -1058,84 +1279,104 @@ class IncrementalGameCog(commands.Cog):
         if found_player:
             await db.execute('''
             UPDATE players
-            SET player_display_name = ?, last_update_time = ?
+            SET player_display_name = ?, start_date = ?, last_update_time = ?
             WHERE player_id == ?
-            ''', (player.display_name, player.last_update_time, player_id))
+            ''', (player.display_name, player.start_date, player.last_update_time, player_id))
         else:
             await db.execute('''
-            INSERT INTO players (player_id, player_display_name, last_update_time)
-            VALUES (?, ?, ?)
-            ''', (player_id, player.display_name, player.last_update_time))
+            INSERT INTO players (player_id, player_display_name, start_date, last_update_time)
+            VALUES (?, ?, ?, ?)
+            ''', (player_id, player.display_name, player.start_date, player.last_update_time))
 
-    async def register_player(self, player_id: str, display_name: str):
+    async def register_player(self, player_id: int, display_name: str):
         new_player = Player(player_id, display_name)
         new_player.add_currency(self.currencies[0].copy())
         new_player.add_skill(self.skills[0].copy())
         new_player.add_energy(self.energies[0].copy())
+        new_player.add_upgrade(self.upgrades[0].copy())
 
-        self.players[player_id] = new_player
+        self.players[int(player_id)] = new_player
 
+        self.recalculate_player_modifiers(new_player)
         await self.player_to_database_update(player_id)
 
     def player_stats_embed_message(self, player):
+        embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
         embed = discord.Embed(
             title="🎩 Player Status",
-            description=f"**{player.title}**: __{player.display_name}__\nTime passed: {format_time(player.time_since_last_update)}",
-            color=discord.Color.green()
+            description=f"**{player.title}**: __{player.display_name}__\nPlaytime: {format_time((datetime.now() - player.start_date).total_seconds())}\nTime passed: {format_time(player.time_since_last_update)}",
+            color=embed_color
         )
+
+        formatted_currencies = []
+        for currency in player.currencies.values():
+            bars_to_fill = int(((currency.amount / currency.capacity) * 100) // 10)
+            currency_bar = f'  {"█" * bars_to_fill}' + f'{"░" * (10 - bars_to_fill)}'
+            last_gained = f"  (+{format_number(currency.last_gained)})" if currency.last_gained > 0 else ''
+            formatted_currencies.append(f"{currency.name.capitalize()}: {format_number(currency.amount)}/{format_number(currency.capacity)}{currency_bar}{last_gained}")
+
+        embed.add_field(name="💰 Currencies", value='\n'.join(formatted_currencies), inline=False)
+
         if player.energies:
             energies_list = [str(energy) for energy in player.energies.values()]
-            embed.add_field(name='Energies', value='\n'.join(energies_list), inline=False)
+            embed.add_field(name='⚡ Energies', value='\n'.join(energies_list), inline=False)
 
         if player.skills:
             skills_list = [str(skill) for skill in player.skills.values()]
-            embed.add_field(name='Skills', value='\n'.join(skills_list), inline=False)
+            embed.add_field(name='🎓 Skills', value='\n'.join(skills_list), inline=False)
 
         player_base_energy = player.energies[0]
         recover_text = ' (Recovering energy)' if player_base_energy.recovering else ''
         if player.current_activity:
             embed.add_field(name="🏃 Current activity", value=player.current_activity.status_description + recover_text, inline=False)
         else:
-            embed.add_field(name="🏃 Current activity", value='Currently doing nothing. Go get an activity!' + recover_text, inline=False)
-
-        formatted_currencies = []
-        for currency in player.currencies.values():
-            last_gained = f" (+{format_number(currency.last_gained)})" if currency.last_gained > 0 else ''
-            formatted_currencies.append(f"{currency.name.capitalize()}: {format_number(currency.amount)}/{format_number(currency.capacity)}{last_gained}")
-
-        embed.add_field(name="💰 Currencies", value='\n'.join(formatted_currencies), inline=False)
+            embed.add_field(name="🏃 Current activity", value='C__urrently doing nothing. Go get an activity!__' + recover_text, inline=False)
 
         if player.upgrades:
             embed.add_field(name="🛠️ Upgrades", value=', '.join([str(upgrade) for upgrade in player.upgrades.values()]), inline=False)
 
         return embed
 
-    def player_shop_embed_message(self, player):
-        embed = discord.Embed(
-            title="🛒 Upgrade shop",
-            description=f"**{player.title}**: __{player.display_name}__",
-            color=discord.Color.green()
-        )
+    def player_shop_embed_message(self, player, page=1):
+        embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
         formatted_currencies = []
         for currency in player.currencies.values():
             formatted_currencies.append(f"{currency.name.capitalize()}: {format_number(currency.amount)}/{format_number(currency.capacity)} (+{format_number(currency.last_gained)})")
-
-        embed.add_field(name="💰 Currencies", value='\n'.join(formatted_currencies), inline=False)
 
         missing_upgrades = self.get_missing_upgrades(player)
 
         missing_upgrades_text = []
 
+        if page < 1:
+            page = 1
+
+        upgrades_count = 0
         if missing_upgrades:
             for upgrade, upgrades_left in missing_upgrades:
                 if not self.check_conditions(player, upgrade.unlock_conditions):
                     continue
-                missing_upgrades_text.append(
-                    f"**{upgrade.name}**\n"
-                    f"• Cost: `{upgrade.cost} {upgrade.cost_material}`\n"
-                    f"• Remaining: `{upgrades_left}`"
-                    f"{self.format_upgrade_text(upgrade)}"
-                )
+                upgrades_count += 1
+
+                start_index = (page - 1) * UPGRADES_PER_PAGE
+                end_index = page * UPGRADES_PER_PAGE
+
+                if start_index < upgrades_count <= end_index:
+                    missing_upgrades_text.append(
+                        f"**{upgrade.name}**\n"
+                        f"• Cost: `{upgrade.cost} {upgrade.cost_material}`\n"
+                        f"• Remaining: `{upgrades_left}`"
+                        f"{self.format_upgrade_text(upgrade)}"
+                    )
+
+        pages = max(1, math.ceil(upgrades_count / UPGRADES_PER_PAGE))
+
+        embed = discord.Embed(
+            title=f"🛒 Upgrade shop - Page {page}/{pages}",
+            description=f"**{player.title}**: __{player.display_name}__",
+            color=embed_color
+        )
+
+        embed.add_field(name="💰 Currencies", value='\n'.join(formatted_currencies), inline=False)
 
         embed.add_field(
             name="🛠️ Buyable Upgrades",
@@ -1145,43 +1386,62 @@ class IncrementalGameCog(commands.Cog):
 
         return embed
 
-    def player_activities_embed_message(self, player):
-        """Create the activities embed message for the player."""
-        embed = discord.Embed(
-            title="🏃 Available Activities",
-            description="You can select an activity here and you will continously do it.",
-            color=discord.Color.green()
-        )
+    def player_activities_embed_message(self, player, page=1):
+        embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
 
         activities = self.get_available_activities(player)
+
+        activities_count = 0
+
+        activity_details = []
+
         for activity in activities:
 
-            stat_key = f"{activity.output_item}.gain"
+            activities_count += 1
 
-            modifiers = player.stat_modifiers.get(stat_key, {'increase': 0, 'multiplier': 1.0})
+            start_index = (page - 1) * ACTIVITIES_PER_PAGE
+            end_index = page * ACTIVITIES_PER_PAGE
 
-            modified_output = (activity.output_amount + modifiers['increase']) * modifiers['multiplier']
+            if start_index < activities_count <= end_index:
+                stat_key = f"{activity.output_item}.gain"
 
-            modified_output_text = f" `+{(modified_output - activity.output_amount):.2f}` " if modified_output - activity.output_amount > 0 else ''
+                modifiers = player.stat_modifiers.get(stat_key, {'increase': 0, 'multiplier': 1.0})
 
-            requirements_text = f"\n• Requirements: `{'`, `'.join(activity.unlock_conditions)}`\n" if activity.unlock_conditions else ''
+                modified_output = (activity.output_amount + modifiers['increase']) * modifiers['multiplier']
 
-            activity_energy = next((energy for energy in self.get_energies().values() if energy and activity.energy_type and activity.energy_type.lower() == energy.name.lower()), None)
+                modified_output_text = f" `+{(modified_output - activity.output_amount):.2f}` " if modified_output - activity.output_amount > 0 else ''
 
-            if activity_energy:
-                drain_text = f"\n• Drain: __{format_number(activity.energy_drain_rate)}__ {activity_energy.name.capitalize()} per second"
-            else:
-                drain_text = ''
+                requirements_text = f"\n• Requirements: `{'`, `'.join(activity.unlock_conditions)}`" if activity.unlock_conditions else ''
 
-            activity_details = (
-                f"*{activity.description}*"
-                f"\n• Benefit: __{activity.output_amount:.2f}__ {modified_output_text}{activity.output_item.capitalize()} per second"
-                f"{drain_text}"
-                f"{requirements_text}"
-            )
+                benefits_text = f"\n• Benefit: __{activity.output_amount:.2f}__ {modified_output_text}{activity.output_item.capitalize()} per second" if activity.output_item else ''
 
-            embed.add_field(name=f'{activity.name}', value=activity_details, inline=False)
+                activity_energy = next((energy for energy in self.get_energies().values() if energy and activity.energy_type and activity.energy_type.lower() == energy.name.lower()), None)
 
+                if activity_energy:
+                    drain_text = f"\n• Drain: __{format_number(activity.energy_drain_rate)}__ {activity_energy.name.capitalize()} per second"
+                else:
+                    drain_text = ''
+
+                activity_exp = f'\nGains `{format_number(activity.skill_exp_rate)}` {activity.skill.name} experience per second' if activity.skill else ''
+
+                activity_details.append(
+                    f"**{activity.name}**"
+                    f"\n*{activity.description}*"
+                    f"{benefits_text}"
+                    f"{drain_text}"
+                    f"{requirements_text}"
+                    f"{activity_exp}"
+                )
+
+        pages = max(1, math.ceil(activities_count / ACTIVITIES_PER_PAGE))
+
+        embed = discord.Embed(
+            title=f"🏃 Available Activities - Page {page}/{pages}",
+            description="You can select an activity here and you will continously do it.",
+            color=embed_color
+        )
+
+        embed.add_field(name='', value='\n\n'.join(activity_details), inline=False)
         return embed
 
     def format_upgrade_text(self, upgrade:  Upgrade):
@@ -1191,7 +1451,7 @@ class IncrementalGameCog(commands.Cog):
             amount = effect['modifier_value']  # example 1.5
             modifier_type = effect['modifier_type']  # example multiplier
 
-            material_type, material_modifier = effect_key.split('.') # example coin.gain
+            material_type, material_modifier = effect_key.split('.')  # example coin.gain
             modifier_type_text = modifier_type
 
             material_modifier_text = material_modifier
@@ -1215,7 +1475,8 @@ class IncrementalGameCog(commands.Cog):
             effects_text.append(f'{modifier_type_text} __{material_type.capitalize()}__ **{material_modifier_text}** by `{modifier_symbol}{format_number(amount)}`')
 
         if effects_text:
-            formatted_text = '\n• Effects: ' + '\n'.join(effects_text)
+            effects_intro = '• Effects: ' + ('\n' if len(effects_text) > 1 else '')
+            formatted_text = f'\n{effects_intro}' + '\n'.join(effects_text)
 
         if upgrade.unlocks:
             formatted_text += '\n• Unlocks: `'
@@ -1276,6 +1537,42 @@ class IncrementalGameCog(commands.Cog):
                 pass
 
         return True
+
+    async def save_channels_to_db(self):
+        async with aiosqlite.connect(SERVER_DB_LOCATION) as db:
+            for server_id, values in self.allowed_channels.items():
+                server_name = values["name"]
+                channels = values["channels"]
+                async with db.execute('''
+                SELECT server_id
+                FROM servers
+                WHERE server_id = ?''', (server_id,)) as cursor:
+                    result = await cursor.fetchone()
+
+                if result is None:
+                    await db.execute('''
+                        INSERT INTO servers (server_id, server_name)
+                        VALUES (?, ?)
+                    ''', (server_id, server_name))
+
+                for channel in channels:
+                    channel_id = channel["id"]
+                    channel_name = channel["name"]
+
+                    async with db.execute('''
+                        SELECT channel_id
+                        FROM channels
+                        WHERE channel_id = ? AND server_id = ?
+                    ''', (channel_id, server_id)) as cursor:
+                        channel_result = await cursor.fetchone()
+
+                        if channel_result is None:
+                            await db.execute('''
+                                INSERT INTO channels (channel_id, server_id, channel_name)
+                                VALUES (?, ?, ?)
+                            ''', (channel_id, server_id, channel_name))
+
+            await db.commit()
 
 
 @commands.command(name='sync')
@@ -1377,6 +1674,18 @@ async def create_skills_table(db_location):
                 exp_formula TEXT
         )
         ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS skill_effects (
+            id INTEGER PRIMARY KEY,
+            skill_id INTEGER NOT NULL,
+            stat TEXT NOT NULL,
+            modifier_type TEXT NOT NULL,
+            modifier_value REAL NOT NULL,
+            UNIQUE (skill_id, stat, modifier_type),
+            FOREIGN KEY (skill_id) REFERENCES skills (skill_id) ON DELETE CASCADE
+        )
+        ''')
         await db.commit()
 
 
@@ -1422,6 +1731,8 @@ async def create_activities_table(database_location):
             output_amount REAL NOT NULL,
             energy_type TEXT,
             energy_drain_rate REAL,
+            skill TEXT,
+            skill_exp_rate REAL,
             unlock_conditions TEXT,
             description TEXT,
             status_description TEXT
@@ -1465,8 +1776,9 @@ async def create_upgrades_table(database_location):
         await db.execute('''
         CREATE TABLE IF NOT EXISTS upgrade_unlocks (
             id INTEGER PRIMARY KEY,
-            upgrade_id INTEGER,
-            condition TEXT,
+            upgrade_id INTEGER NOT NULL,
+            condition TEXT NOT NULL,
+            UNIQUE (upgrade_id, condition),
             FOREIGN KEY (upgrade_id) REFERENCES upgrades (upgrade_id) ON DELETE CASCADE
         )
         ''')
@@ -1474,10 +1786,11 @@ async def create_upgrades_table(database_location):
         await db.execute('''
         CREATE TABLE IF NOT EXISTS upgrade_effects (
             id INTEGER PRIMARY KEY,
-            upgrade_id INTEGER,
-            stat TEXT,
-            modifier_type TEXT,
-            modifier_value REAL,
+            upgrade_id INTEGER NOT NULL,
+            stat TEXT NOT NULL,
+            modifier_type TEXT NOT NULL,
+            modifier_value REAL NOT NULL,
+            UNIQUE (upgrade_id, stat, modifier_type),
             FOREIGN KEY (upgrade_id) REFERENCES upgrades (upgrade_id) ON DELETE CASCADE
         )
         ''')
@@ -1574,7 +1887,28 @@ async def create_players_table(database_location):
             CREATE TABLE IF NOT EXISTS players (
                 player_id INTEGER PRIMARY KEY,
                 player_display_name TEXT NOT NULL,
+                start_date TEXT,
                 last_update_time TEXT
+            )
+        ''')
+        await db.commit()
+
+
+async def create_server_channel_table(database_location):
+    async with aiosqlite.connect(database_location) as db:
+        # Create a table if it doesn't exist
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS servers (
+                server_id BIGINT PRIMARY KEY,
+                server_name TEXT
+            )
+        ''')
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS channels (
+                channel_id BIGINT PRIMARY KEY,
+                server_id BIGINT,
+                channel_name TEXT,
+                FOREIGN KEY (server_id) REFERENCES servers(server_id)
             )
         ''')
         await db.commit()
@@ -1603,6 +1937,18 @@ async def update_skills_from_json_to_db(database_location):
                 INSERT OR REPLACE INTO skills (skill_id, name, description, start_level, max_level, base_exp_requirement, scaling_factor, exp_formula)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (skill['id'], skill['name'], skill['description'], skill['start_level'], skill['max_level'], skill['base_exp_requirement'], skill['scaling_factor'], skill['exp_formula']))
+
+            if 'effects' in skill and skill['effects']:
+                for stat, effect in skill['effects'].items():
+                    await db.execute('''
+                        INSERT OR REPLACE INTO skill_effects (
+                            skill_id, stat, modifier_type, modifier_value
+                        )
+                        VALUES (?, ?, ?, ?)
+                    ''', (
+                        skill['id'], stat, effect['modifier_type'], effect['modifier_value']
+                    ))
+
         await db.commit()
 
 
@@ -1613,12 +1959,14 @@ async def update_activities_from_json_to_db(database_location):
     async with aiosqlite.connect(database_location) as db:
         for activity in activities:
             await db.execute('''
-                INSERT OR REPLACE INTO activities (activity_id, name, icon, output_item, output_amount, energy_type, energy_drain_rate, unlock_conditions, description, status_description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO activities (activity_id, name, icon, output_item, output_amount, energy_type, energy_drain_rate, skill, skill_exp_rate, unlock_conditions, description, status_description)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (activity['id'], activity['name'], activity['icon'],
                   activity['output_item'], activity['output_amount'],
                   activity['energy_type'],
                   activity['energy_drain_rate'],
+                  activity['skill'],
+                  activity['skill_exp_rate'],
                   ','.join(activity['unlock_conditions']),
                   activity['description'],
                   activity['status_description']))
@@ -1689,7 +2037,7 @@ async def update_upgrades_from_json_to_db(database_location):
 
                     if not exists:
                         await db.execute('''
-                            INSERT INTO upgrade_unlocks (upgrade_id, condition)
+                            INSERT OR REPLACE INTO upgrade_unlocks (upgrade_id, condition)
                             VALUES (?, ?)
                         ''', (upgrade['id'], condition))
 
@@ -1702,7 +2050,7 @@ async def update_upgrades_from_json_to_db(database_location):
 
                     if not exists:
                         await db.execute('''
-                            INSERT INTO upgrade_unlock_conditions (upgrade_id, condition)
+                            INSERT OR REPLACE INTO upgrade_unlock_conditions (upgrade_id, condition)
                             VALUES (?, ?)
                         ''', (upgrade['id'], condition))
 
@@ -1715,6 +2063,9 @@ async def setup(bot):
     bot.add_command(tree_sync)
 
     # create table if not exist
+
+    await create_server_channel_table(SERVER_DB_LOCATION)
+
     await create_players_table(GAME_DB_LOCATION)
 
     await create_items_table(GAME_DB_LOCATION)
@@ -1744,10 +2095,12 @@ async def setup(bot):
     game_cog = IncrementalGameCog(bot)
     await bot.add_cog(game_cog)
 
+    await game_cog.get_server_channels_from_db()
+
     await game_cog.get_currencies_from_db()
     await game_cog.get_upgrades_from_db()
-    await game_cog.get_activities_from_db()
     await game_cog.get_skills_from_db()
+    await game_cog.get_activities_from_db()
     await game_cog.get_energies_from_db()
 
     game_cog.initialize()

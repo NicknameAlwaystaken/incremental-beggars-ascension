@@ -7,16 +7,48 @@
         "max_level": 30,
         "base_exp_requirement": 500,
         "scaling_factor": 2.2,
-        "exp_formula": "base_exp * (scaling_factor ^ (current_level - start_level))"
+        "exp_formula": "base_exp * (scaling_factor ^ (current_level - start_level))",
+        "effects": {
+            "pouch.max_purchases": {
+                "modifier_type": "increase",
+                "modifier_value": 1
+            }
+        }
     },
     {
         "id": 1,
-        "name": "Some other skill",
-        "description": "No description",
+        "name": "Thieving",
+        "description": "Good for criminal activity.",
         "start_level": 1,
         "max_level": 50,
         "base_exp_requirement": 50,
         "scaling_factor": 1.5,
-        "exp_formula": "base_exp * (scaling_factor ^ (level - 1))"
+        "exp_formula": "base_exp * (scaling_factor ^ (level - 1))",
+        "effects": {
+        }
+    },
+    {
+        "id": 2,
+        "name": "Fishing",
+        "description": "Become a Master Fisher!",
+        "start_level": 1,
+        "max_level": 50,
+        "base_exp_requirement": 50,
+        "scaling_factor": 1.5,
+        "exp_formula": "base_exp * (scaling_factor ^ (level - 1))",
+        "effects": {
+        }
+    },
+    {
+        "id": 3,
+        "name": "Farming",
+        "description": "Grow things, and maybe eat them?",
+        "start_level": 1,
+        "max_level": 50,
+        "base_exp_requirement": 50,
+        "scaling_factor": 1.5,
+        "exp_formula": "base_exp * (scaling_factor ^ (level - 1))",
+        "effects": {
+        }
     }
 ]
