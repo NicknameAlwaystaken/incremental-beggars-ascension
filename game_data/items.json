@@ -1,9 +1,17 @@
 [
     {
         "id": 0,
-        "name": "sword",
-        "attributes": {
-            "attack": 5
-        }
+        "name": "coins",
+        "capacity": 10
+    },
+    {
+        "id": 1,
+        "name": "fish",
+        "capacity": 5
+    },
+    {
+        "id": 2,
+        "name": "plants",
+        "capacity": 10
     }
 ]

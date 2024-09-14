@@ -1,0 +1,74 @@
+[
+    {
+        "id": 0,
+        "name": "Sell Plants",
+        "icon": "🌿",
+        "outputs": [
+            {
+                "item": "coins",
+                "amount":3
+            }
+        ],
+        "costs": [
+            {
+                "item": "plants",
+                "amount": 1
+            }
+        ],
+        "energy_costs": [],
+        "unlock_conditions": ["farming"],
+        "unlocks": [],
+        "description": "Sell plants for money. Who would actually buy them?",
+        "task_amount": -1,
+        "effects": {
+        }
+    },
+    {
+        "id": 1,
+        "name": "Sell Fish",
+        "icon": "🐟",
+        "outputs": [
+            {
+                "item": "coins",
+                "amount":1
+            }
+        ],
+        "costs": [
+            {
+                "item": "fish",
+                "amount": 1
+            }
+        ],
+        "energy_costs": [],
+        "unlock_conditions": ["fishing"],
+        "unlocks": [],
+        "description": "Sell fish for money. Good riddance!",
+        "task_amount": -1,
+        "effects": {
+        }
+    },
+    {
+        "id": 2,
+        "name": "Help Bystanders",
+        "icon": "🤝",
+        "outputs": [
+            {
+                "item": "coins",
+                "amount":1
+            }
+        ],
+        "costs": [],
+        "energy_costs": [
+            {
+                "energy": "energy",
+                "amount": 0.5
+            }
+        ],
+        "unlock_conditions": [],
+        "unlocks": [],
+        "description": "Be of help around the village.",
+        "task_amount": -1,
+        "effects": {
+        }
+    }
+]
