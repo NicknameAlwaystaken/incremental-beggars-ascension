@@ -137,8 +137,8 @@ class ActivitiesMenuView(BaseView):
         else:
             stop_button_style = discord.ButtonStyle.secondary
 
-        stop_activity_button = discord.ui.Button(label=f'Stop', style=stop_button_style, row=1)
-        stop_activity_button.callback = partial(self.cog.start_activity_callback, activity="None")
+        stop_activity_button = discord.ui.Button(label=f'Stop all activites', style=stop_button_style, row=1)
+        stop_activity_button.callback = partial(self.cog.start_activity_callback, activity=None)
         self.add_item(stop_activity_button)
 
         # Back and Update buttons

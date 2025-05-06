@@ -7,7 +7,7 @@
         "max_purchases": 5,
         "unlock_conditions": [],
         "unlocks": [],
-        "description": "For each stamina level you can buy another",
+        "description": "For each stamina level you can carry more",
         "effects": {
             "coins.capacity": {
                 "modifier_type": "increase",
@@ -23,7 +23,7 @@
         "max_purchases": 1,
         "unlock_conditions": [],
         "unlocks": ["thieving"],
-        "description": "No description",
+        "description": "Somehow coins get glued onto your fingers.",
         "effects": {
             "coins.gain": {
                 "modifier_type": "multiplier",
@@ -35,11 +35,11 @@
         "id": "2",
         "name": "Tattered Mat",
         "cost_material": "coins",
-        "cost": 10,
+        "cost": 30,
         "max_purchases": 1,
         "unlock_conditions": ["level.stamina.6"],
         "unlocks": [],
-        "description": "No description",
+        "description": "Beats sleeping on cold streets",
         "effects": {
             "energy.recovery_rate": {
                 "modifier_type": "increase",
@@ -55,7 +55,7 @@
         "max_purchases": 1,
         "unlock_conditions": [],
         "unlocks": ["manual labour"],
-        "description": "No description",
+        "description": "You decide to put your body to work!",
         "effects": {
             "pouch.max_purchases": {
                 "modifier_type": "increase",
@@ -71,7 +71,7 @@
         "max_purchases": 1,
         "unlock_conditions": [],
         "unlocks": [],
-        "description": "No description",
+        "description": "Why not just actually have bigger pouches?",
         "effects": {
             "pouch.effects": {
                 "modifier_type": "increase",
@@ -83,7 +83,7 @@
         "id": "5",
         "name": "Fishing contract",
         "cost_material": "coins",
-        "cost": 30,
+        "cost": 80,
         "max_purchases": 1,
         "unlock_conditions": ["level.fishing.3"],
         "unlocks": [],
@@ -111,7 +111,7 @@
         "id": "7",
         "name": "Fisher's Stamina",
         "cost_material": "coins",
-        "cost": 50,
+        "cost": 80,
         "max_purchases": 1,
         "unlock_conditions": ["level.fishing.5"],
         "unlocks": [],
@@ -127,7 +127,7 @@
         "id": "8",
         "name": "Pots as stash",
         "cost_material": "coins",
-        "cost": 30,
+        "cost": 80,
         "max_purchases": 1,
         "unlock_conditions": ["level.farming.3"],
         "unlocks": [],
@@ -147,7 +147,7 @@
         "max_purchases": 1,
         "unlock_conditions": [],
         "unlocks": ["farming"],
-        "description": "No description",
+        "description": "Maybe I could use pots for hiding coins instead?",
         "effects": {
         }
     },
@@ -155,7 +155,7 @@
         "id": "10",
         "name": "Flower's scent",
         "cost_material": "coins",
-        "cost": 50,
+        "cost": 80,
         "max_purchases": 1,
         "unlock_conditions": ["level.farming.5"],
         "unlocks": [],
@@ -184,6 +184,102 @@
             "thieving.exp_passive_gain": {
                 "modifier_type": "increase",
                 "modifier_value": 0.5
+            }
+        }
+    },
+    {
+        "id": "12",
+        "name": "Basket",
+        "cost_material": "coins",
+        "cost": 50,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.farming.2"],
+        "unlocks": [],
+        "description": "This helps me carry plants.",
+        "effects": {
+            "plants.capacity": {
+                "modifier_type": "increase",
+                "modifier_value": 10
+            }
+        }
+    },
+    {
+        "id": "13",
+        "name": "Fish barrel",
+        "cost_material": "coins",
+        "cost": 50,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.fishing.2"],
+        "unlocks": [],
+        "description": "Does not smell like fish, yet.",
+        "effects": {
+            "fish.capacity": {
+                "modifier_type": "increase",
+                "modifier_value": 10
+            }
+        }
+    },
+    {
+        "id": "14",
+        "name": "Thief's stash",
+        "cost_material": "coins",
+        "cost": 50,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.thieving.2"],
+        "unlocks": [],
+        "description": "Hidden stash for treasure, if I had some.",
+        "effects": {
+            "coins.capacity": {
+                "modifier_type": "increase",
+                "modifier_value": 20
+            }
+        }
+    },
+    {
+        "id": "15",
+        "name": "Coin Belt",
+        "cost_material": "coins",
+        "cost": 30,
+        "max_purchases": 3,
+        "unlock_conditions": [],
+        "unlocks": [],
+        "description": "Neat, this makes carrying coins easier.",
+        "effects": {
+            "coins.capacity": {
+                "modifier_type": "increase",
+                "modifier_value": 30
+            }
+        }
+    },
+    {
+        "id": "16",
+        "name": "Wooden Crate",
+        "cost_material": "coins",
+        "cost": 100,
+        "max_purchases": 1,
+        "unlock_conditions": [],
+        "unlocks": [],
+        "description": "Looks sturdy enough, probably no holes.",
+        "effects": {
+            "coins.capacity": {
+                "modifier_type": "increase",
+                "modifier_value": 200
+            }
+        }
+    },
+    {
+        "id": "17",
+        "name": "Familiar pockets",
+        "cost_material": "coins",
+        "cost": 80,
+        "max_purchases": 1,
+        "unlock_conditions": ["level.thieving.3"],
+        "unlocks": [],
+        "description": "You are getting better at stealing from familiar pockets.",
+        "effects": {
+            "coins.gain": {
+                "modifier_type": "multiplier",
+                "modifier_value": 1.2
             }
         }
     }

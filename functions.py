@@ -1,14 +1,18 @@
 from __future__ import annotations
+from abc import abstractmethod
 from discord.ext import commands
 from datetime import datetime
 import discord
 import aiosqlite
 import math
-import json
 import os
-from views import ShopMenuView, MainMenuView, ActivitiesMenuView, TasksMenuView
+import random
+from views.views import BaseView, ShopMenuView, MainMenuView, ActivitiesMenuView, TasksMenuView
+from views.dropdownviews import DropdownBaseView, GamesDropdownView, PlayersDropdownView, RPSDropdownView, RPSView, RematchChallengeView, StartChallengeView
 from typing import Optional, Any
 from copy import deepcopy
+from functools import reduce
+from game_database import create_activities_table, create_energies_table, create_games_table, create_items_table, create_player_activities_table, create_player_chips_table, create_player_energies_table, create_player_games_table, create_player_items_table, create_player_skills_table, create_player_tasks_table, create_player_upgrades_table, create_players_table, create_server_channel_table, create_skills_table, create_tasks_table, create_upgrades_table, update_activities_from_json_to_db, update_energies_from_json_to_db, update_games_from_json_to_db, update_items_from_json_to_db, update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_skills, update_player_upgrades, update_skills_from_json_to_db, update_tasks_from_json_to_db, update_upgrades_from_json_to_db
 
 tree = None
 
@@ -29,6 +33,31 @@ TASKS_PER_PAGE = 5
 UPGRADES_PER_PAGE = 4
 
 PRESHOW_BASIC_UNLOCKS = ["thieving", "fishing", "manual labour", "farming"]
+
+
+class Game:
+    def __init__(self, id, name):
+        self.id = id
+        self.name = name
+        self.played = 0
+        self.wins = 0
+        self.losses = 0
+        self.amount_bet = 0
+        self.earnings = 0
+
+    def copy(self):
+        new_game = Game(
+            id=self.id,
+            name=self.name
+        )
+
+        new_game.played = self.played
+        new_game.wins = self.wins
+        new_game.losses = self.losses
+        new_game.amount_bet = self.amount_bet
+        new_game.earnings = self.earnings
+
+        return new_game
 
 
 class Energy:
@@ -226,14 +255,19 @@ class Item:
         self.amount = amount
 
     def add_amount(self, amount: float):
-        current_amount = self.amount
         self.amount += amount
-        self.amount = min(self.amount, self.capacity)
+
+    def increase_amount(self, amount: float):
+        current_amount = self.amount
+        if current_amount <= self.capacity:
+            self.amount += amount
+            self.amount = min(self.amount, self.capacity)
+
         self.last_gained = self.amount - current_amount
 
     def passive_gain(self, seconds):
         if self.item_passive_gain > 0:
-            self.add_amount(seconds * self.item_passive_gain)
+            self.increase_amount(seconds * self.item_passive_gain)
 
     def __str__(self):
         return f"{self.name}: {format_number(self.amount)}/{format_number(self.capacity)} " \
@@ -308,14 +342,17 @@ class Upgrade:
 
 
 class Player:
-    def __init__(self, player_id: int, display_name: str):
+    def __init__(self, player_id: int, name: str, display_name: str):
         self.id = player_id
         self.title = 'Beggar'
+        self.name = name
         self.display_name = display_name
         self.items: dict[int, Item] = {}
         self.upgrades: dict[int, Upgrade] = {}
         self.skills: dict[int, Skill] = {}
         self.energies: dict[int, Energy] = {}
+        self.games: dict[int, Game] = {}
+        self.chips = 0
         self.stat_modifiers: dict[str, dict[str, float]] = {}
         self.unlock_conditions = []
         self.last_update_time = datetime.now()
@@ -325,6 +362,9 @@ class Player:
 
     def add_skill(self, skill: Skill):
         self.skills[skill.id] = skill
+
+    def add_game(self, game: Game):
+        self.games[game.id] = game
 
     def buy_upgrade(self, upgrade:  Upgrade, count=1):
         new_upgrade = upgrade.copy()
@@ -504,10 +544,7 @@ class Player:
 
         return deplete_amount
 
-    def update(self, current_time):
-        if not self.energies:
-            return
-
+    def update(self, current_time: datetime):
         activity_steps = (current_time - self.last_update_time).total_seconds()
 
         if activity_steps < 1:
@@ -573,14 +610,14 @@ class Player:
                             self.items[activity_item.id] = activity_item.copy()
                             activity_item = self.items[activity_item.id]
 
-                        activity_item.add_amount(current_activity.output_amount * activity_count)
+                        activity_item.increase_amount(current_activity.output_amount * activity_count)
 
                     if player_item:
                         if player_item.name in self.stat_modifiers:
                             item_modifier = self.stat_modifiers[player_item.name]
                             amount_to_add *= item_modifier['multiplier']
 
-                        player_item.add_amount(amount_to_add)
+                        player_item.increase_amount(amount_to_add)
 
         # Recover energy if it's not idle and not full
         elif not self.current_activity and base_energy.is_not_full():
@@ -620,9 +657,184 @@ class WrongChannelError(commands.CheckFailure):
     pass
 
 
+class GameSession:
+    _session_id = 0
+
+    def __init__(self, game_id: int, challenger: Player, challenged: Player, game_name, bet_amount, game_channel):
+        self.game_id = game_id
+        self.challenger = challenger
+        self.challenged = challenged
+        self.game_name = game_name
+        self.bet_amount = bet_amount
+        self.game_channel = game_channel
+        self.accepted = False
+        self.declined = False
+        self.started = False
+        self.finished = False
+        self.message: Optional[discord.Message] = None
+
+        self.winner: Any = None
+        self.loser: Any = None
+
+        self.challenger_score = 0
+        self.challenged_score = 0
+
+        self.challenger_option: str | None = None
+        self.challenged_option: str | None = None
+
+        self.session_id = GameSession._session_id
+        GameSession._session_id += 1
+
+    def reset_game(self):
+        self.finished = False
+        self.accepted = False
+        self.declined = False
+        self.started = False
+
+    def get_player_ids(self):
+        return [self.challenger.id, self.challenged.id]
+
+    def get_players(self, user_id):
+        if user_id == self.challenger.id:
+            return self.challenger, self.challenged
+        return self.challenged, self.challenger
+
+    @abstractmethod
+    def check_winner(self):
+        pass
+
+    async def update_message(self):
+        if self.message:
+            await self.message.edit(content='', embed=self.embed_message())
+
+    async def restart_match(self, cog):
+        if self.message:
+            view = RematchChallengeView(cog, self.get_player_ids())
+            await self.message.edit(embed=self.embed_message(), view=view)
+
+    async def accept(self):
+        self.accepted = True
+        self.started = True
+
+    async def decline(self):
+        self.declined = True
+        self.started = False
+
+    @abstractmethod
+    def embed_message(self) -> discord.Embed:
+        pass
+
+
+class RPSGameSession(GameSession):
+    def __init__(self, game_id, challenger, challenged, game_name, bet_amount, channel):
+        super().__init__(game_id, challenger, challenged, game_name, bet_amount, channel)
+
+    def check_winner(self):
+        if self.challenger_option is not None and self.challenged_option is not None:
+            if (
+                (self.challenger_option == "Rock" and self.challenged_option == "Scissors") or
+                (self.challenger_option == "Scissors" and self.challenged_option == "Paper") or
+                (self.challenger_option == "Paper" and self.challenged_option == "Rock")
+               ):
+                self.challenger_score += 1
+
+                self.winner = self.challenger
+                self.loser = self.challenged
+
+                self.winner.games[self.game_id].wins += 1
+                self.winner.games[self.game_id].earnings += self.bet_amount
+                self.winner.games[self.game_id].amount_bet += self.bet_amount
+
+                self.loser.games[self.game_id].losses += 1
+                self.loser.games[self.game_id].amount_bet += self.bet_amount
+
+            elif self.challenger_option == self.challenged_option:
+                self.winner = "tie"
+            else:
+                self.challenged_score += 1
+
+                self.winner = self.challenged
+                self.loser = self.challenger
+
+                self.winner.games[self.game_id].wins += 1
+                self.winner.games[self.game_id].earnings += self.bet_amount
+                self.winner.games[self.game_id].amount_bet += self.bet_amount
+
+                self.loser.games[self.game_id].losses += 1
+                self.loser.games[self.game_id].amount_bet += self.bet_amount
+
+            self.challenger.games[self.game_id].played += 1
+            self.challenged.games[self.game_id].played += 1
+
+            self.finished = True
+
+    def get_player_ids(self):
+        return [self.challenger.id, self.challenged.id]
+
+    def get_players(self, user_id):
+        if user_id == self.challenger.id:
+            return self.challenger, self.challenged
+        return self.challenged, self.challenger
+
+    def reset_game(self):
+        super().reset_game()
+        self.challenger_option: str | None = None
+        self.challenged_option: str | None  = None
+        self.winner = None
+        self.loser = None
+
+    def embed_message(self):
+        embed_color = discord.Color.green() if self.started and not self.finished else discord.Color.red()
+
+        embed = discord.Embed(
+            title="🎰 Current Game",
+            description=f'{self.game_name}',
+            color=embed_color
+        )
+
+        players_text = f"**{self.challenger.display_name}** Score: `{self.challenger_score}`" \
+            f"\n**{self.challenged.display_name}** Score: `{self.challenged_score}`"
+
+        embed.add_field(name="🎮 Players", value=players_text, inline=False)
+
+        if self.declined:
+            embed.add_field(name="Game declined!", value='', inline=False)
+        else:
+            if self.started:
+                choice_dict = {
+                    "Rock": '✊',
+                    "Paper": '🖐',
+                    "Scissors": '✌'
+                }
+
+                check_emoji = '✅'
+                questionmark_emoji = '❓'
+
+                challenger_choice = check_emoji if self.challenger_option else questionmark_emoji
+                challenged_choice = check_emoji if self.challenged_option else questionmark_emoji
+
+                if self.challenger_option and self.challenged_option:
+                    challenger_choice = f'{choice_dict.get(self.challenger_option, "Fail")}'
+                    challenged_choice = f'{choice_dict.get(self.challenged_option, "Fail")}'
+
+                choices_text = f'**{self.challenger.display_name}**: ' + challenger_choice + f'\n**{self.challenged.display_name}**: ' + challenged_choice
+
+                embed.add_field(name="✊🖐✌ Choices", value=choices_text, inline=False)
+
+            if self.winner:
+                if self.winner == 'tie':
+                    winner_text = 'The game is a **TIE**!'
+                else:
+                    winner_text = f'**{self.winner.display_name}** is the winner! 🎉🎉🎉'
+
+                embed.add_field(name="🎉 Game finished!", value=winner_text, inline=False)
+
+        return embed
+
+
 class IncrementalGameCog(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
+    def __init__(self, bot: commands.Bot):
+        self.bot: commands.Bot = bot
         self.players: dict[int, Player] = {}
         self.upgrades: dict[int,  Upgrade] = {}
         self.activities: dict[int, Activity] = {}
@@ -631,11 +843,13 @@ class IncrementalGameCog(commands.Cog):
         self.items: dict[int, Item] = {}
         self.tasks: dict[int, Task] = {}
         self.views: dict[int, discord.ui.View] = {}
+        self.games: dict[int, Game] = {}
+        self.active_games: dict[int, GameSession | RPSGameSession] = {}
         self.allowed_channels = {}
 
         self.initialized = False
 
-        self.play = commands.check(self.is_allowed_channel)(self.play)
+        self.play = commands.check(self.is_allowed_channel)(self.play_command)
 
     def initialize(self):
         self.initialized = True
@@ -655,12 +869,15 @@ class IncrementalGameCog(commands.Cog):
     def get_skills(self):
         return {id: skill.copy() for id, skill in self.skills.items()}
 
+    def get_games(self):
+        return {id: game.copy() for id, game in self.games.items()}
+
     def get_items(self):
         return {id: item.copy() for id, item in self.items.items()}
 
     async def is_allowed_channel(self, ctx):
         if ctx.guild is None:
-            #  Assuming that guild is None that user is using DMs to do commands
+            # Assuming that guild is None that user is using DMs to do commands
             return True
         server_id = ctx.guild.id
         channel_id = ctx.channel.id
@@ -673,6 +890,45 @@ class IncrementalGameCog(commands.Cog):
 
         return True
 
+    async def start_game(self, user, interaction, edit=False):
+        player = await self.get_player(user)
+
+        if player:
+            spacing_character = " "
+            padding_amount = 25
+            full_bar = "🟦"
+            empty_bar = "⬜"
+
+            coins = player.items[0]
+            bars_to_fill = int(((coins.amount / coins.capacity) * 100) // 10)
+            coins_bar = f'  {full_bar * bars_to_fill}' + f'{empty_bar * (10 - bars_to_fill)}'
+            coins_text = f"{coins.name.capitalize()}: {format_number(coins.amount)}/{format_number(coins.capacity)}"
+
+            formatted_coins = f"`🪙 {coins_text + (spacing_character * (padding_amount - len(coins_text)))} {coins_bar}`"
+
+            played, wins, losses, amount_bet, earnings = reduce(lambda acc, game: (
+                    acc[0] + game.played,
+                    acc[1] + game.wins,
+                    acc[2] + game.losses,
+                    acc[3] + game.amount_bet,
+                    acc[4] + game.earnings
+                ), player.games.values(), (0, 0, 0, 0, 0))
+
+            player_stats_text = f'\n\n**Totals**\nPlayed: `{format_number(played)}` Wins: `{format_number(wins)}` Losses: `{format_number(losses)}` Betted: `{format_number(amount_bet)}` Earnings: `{format_number(earnings)}`'
+
+            view = GamesDropdownView(self, user.id, player, self.select_players_callback)
+            content = f"{formatted_coins}" \
+                f"\n\nYou have `{format_number(player.chips)}` Chips. You can trade Chips for Coins in 1:1 ratio." \
+                f"{player_stats_text}" \
+                "\n\nChoose a game:"
+            if not edit:
+                message = await interaction.send(content=content, view=view, ephemeral=True)
+            else:
+                await interaction.response.edit_message(content=content, view=view)
+                message = interaction.message
+
+            self.views[message.id] = message.id
+
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
         if isinstance(error, WrongChannelError):
@@ -683,11 +939,23 @@ class IncrementalGameCog(commands.Cog):
         else:
             raise error
 
+    @commands.hybrid_command(name="game", with_app_command=True)
+    async def start_game_command(self, ctx):
+        """Game menu, you can play games for fun or with a gamble!"""
+        if not self.initialized:
+            print("Not done initializing!")
+            return
+
+        user = ctx.author
+
+        await self.update_player(user)
+        await self.start_game(user, ctx)
+
     # Command to send a message with the button
     @commands.has_permissions(manage_channels=True)
     @commands.hybrid_command(name='add_channel', with_app_command=True)
-    async def add_channel(self, ctx):
-        """Add this channel for this bot"""
+    async def add_channel_command(self, ctx):
+        """Add this channel for using this bot"""
         if not self.initialized:
             print("Not done initializing!")
             return
@@ -712,8 +980,8 @@ class IncrementalGameCog(commands.Cog):
     # Command to send a message with the button
     @commands.has_permissions(manage_channels=True)
     @commands.hybrid_command(name='remove_channel', with_app_command=True)
-    async def remove_channel(self, ctx):
-        """Remove this channel for this bot"""
+    async def remove_channel_command(self, ctx):
+        """Remove this channel for using this bot"""
         if not self.initialized:
             print("Not done initializing!")
             return
@@ -738,7 +1006,7 @@ class IncrementalGameCog(commands.Cog):
         await ctx.send("This channel was not in the channel list.")
 
     @commands.command(name='levelup')
-    async def levelup(self, ctx, *args):
+    async def levelup_command(self, ctx, *args):
         if not self.initialized:
             print("Not done initializing!")
             return
@@ -748,8 +1016,8 @@ class IncrementalGameCog(commands.Cog):
 
         skill_name = args[0]
 
-        user_id = ctx.author.id
-        player = await self.get_player(user_id)
+        user = ctx.author
+        player = await self.get_player(user)
 
         skill = next((skill for skill in self.get_skills().values() if skill.name.lower() == skill_name.lower()), None)
 
@@ -760,10 +1028,10 @@ class IncrementalGameCog(commands.Cog):
                 skill = player.skills[skill.id]
 
             skill.add_experience(skill.exp_required_for_next_level() - skill.current_exp)
-            await self.update_player(player)
+            await self.update_player(user)
 
     @commands.command(name='addexp')
-    async def addexp(self, ctx, *args):
+    async def addexp_command(self, ctx, *args):
         if not self.initialized:
             print("Not done initializing!")
             return
@@ -773,8 +1041,8 @@ class IncrementalGameCog(commands.Cog):
 
         skill_name, experience_amount = args
 
-        user_id = ctx.author.id
-        player = await self.get_player(user_id)
+        user = ctx.author
+        player = await self.get_player(user)
 
         skill = next((skill for skill in self.get_skills().values() if skill.name.lower() == skill_name.lower()), None)
 
@@ -785,19 +1053,19 @@ class IncrementalGameCog(commands.Cog):
                 skill = player.skills[skill.id]
 
             skill.add_experience(int(experience_amount))
-            await self.update_player(player)
+            await self.update_player(user)
 
     # Command to send a message with the button
     @commands.hybrid_command(name='play', with_app_command=True)
-    async def play(self, ctx):
+    async def play_command(self, ctx):
         """Interactive play command"""
         if not self.initialized:
             print("Not done initializing!")
             return
 
-        user_id = ctx.author.id
-        player = await self.get_player(user_id)
-        view = MainMenuView(self, user_id)
+        user = ctx.author
+        player = await self.get_player(user)
+        view = MainMenuView(self, user.id)
 
         if not player:
             view.create_register_menu()
@@ -806,20 +1074,20 @@ class IncrementalGameCog(commands.Cog):
                 "\n**WARNING** Game is still in development so your progress"\
                 " will be reset until full version release!"
             message = await ctx.send(content=register_message, view=view)
-            self.views[message.id] = view
         else:
-            await self.update_player(player)
+            await self.update_player(user)
             message = await ctx.send(content='', embed=self.player_stats_embed_message(player), view=view)
-            self.views[message.id] = view
+
+        self.views[message.id] = view
 
     async def shop_menu_callback(self, interaction: discord.Interaction, page=1):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
         if player:
-            await self.update_player(player)
+            await self.update_player(user)
             if page < 1:
                 page = 1
             view = ShopMenuView(self, user.id, player, UPGRADES_PER_PAGE, page)
@@ -830,18 +1098,18 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
         if player:
-            await self.update_player(player)
+            await self.update_player(user)
 
     async def main_menu_callback(self, interaction: discord.Interaction):
         user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
         if player:
-            await self.update_player(player)
+            await self.update_player(user)
             view = MainMenuView(self, user.id)
             await interaction.response.edit_message(content='', embed=self.player_stats_embed_message(player), view=view)
 
@@ -850,9 +1118,9 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
         if player:
-            await self.update_player(player)
+            await self.update_player(user)
             if page < 1:
                 page = 1
             view = ActivitiesMenuView(self, user.id, player, ACTIVITIES_PER_PAGE, page)
@@ -863,9 +1131,9 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
         if player:
-            await self.update_player(player)
+            await self.update_player(user)
             if page < 1:
                 page = 1
             view = TasksMenuView(self, user.id, player, ACTIVITIES_PER_PAGE, page)
@@ -876,12 +1144,12 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
 
         if player:
             player.buy_upgrade(upgrade)
             self.recalculate_player_modifiers(player)
-            await self.update_player(player)
+            await self.update_player(user)
             view = ShopMenuView(self, user.id, player, UPGRADES_PER_PAGE, page)
             await interaction.response.edit_message(content='', embed=self.player_shop_embed_message(player, page), view=view)
 
@@ -890,11 +1158,11 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
 
         if player:
             player.change_activity(activity)
-            await self.update_player(player)
+            await self.update_player(user)
             view = ActivitiesMenuView(self, user.id, player, ACTIVITIES_PER_PAGE, page)
             await interaction.response.edit_message(content='', embed=self.player_activities_embed_message(player, page), view=view)
 
@@ -903,11 +1171,11 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(user.id)
+        player = await self.get_player(user)
 
         if player:
             self.complete_task(task, player)
-            await self.update_player(player)
+            await self.update_player(user)
             view = TasksMenuView(self, user.id, player, TASKS_PER_PAGE, page)
             await interaction.response.edit_message(content='', embed=self.player_tasks_embed_message(player, page), view=view)
 
@@ -916,22 +1184,217 @@ class IncrementalGameCog(commands.Cog):
         if not await self._is_valid_interaction(interaction):
             return
 
-        player = await self.get_player(int(user.id))
+        player = await self.get_player(user)
 
         if not player:
             # Register the player and update the message
-            await self.register_player(int(user.id), user.display_name)
-            player = await self.get_player(int(user.id))
-            await self.update_player(player)
-            view = MainMenuView(self, user.id)
-            await interaction.response.edit_message(content='', embed=self.player_stats_embed_message(player), view=view)
+            await self.register_player(user)
+            player = await self.get_player(user)
+            if player:
+                await self.update_player(user)
+                view = MainMenuView(self, user.id)
+                await interaction.response.edit_message(content='', embed=self.player_stats_embed_message(player), view=view)
+
+    async def buy_chips_callback(self, interaction: discord.Interaction, amount: int):
+        user = interaction.user
+        player = await self.get_player(user)
+
+        #  Check player coins count
+        if player and 0 in player.items and player.items[0].amount >= amount:
+            player.chips += amount
+            player.items[0].amount -= amount
+
+        await self.update_player(user)
+        await self.start_game(user, interaction, edit=True)
+
+    async def redeem_chips_callback(self, interaction: discord.Interaction, amount: int):
+        user = interaction.user
+        player = await self.get_player(user)
+
+        #  Check player Chips and Coins count, don't allow redeem if not enough coins capacity
+        if player and player.chips >= amount:
+            if 0 in player.items:
+                coins = player.items[0]
+                if coins.capacity >= amount + coins.amount:
+                    player.chips -= amount
+                    coins.amount += amount
+
+        await self.update_player(user)
+        await self.start_game(user, interaction, edit=True)
+
+    async def select_players_callback(self, interaction: discord.Interaction, option):
+        if not await self._is_valid_interaction(interaction):
+            return
+        user = interaction.user
+        player = await self.get_player(user)
+        if player and interaction.guild:
+            player_list = [player for player in self.get_players_from_server(interaction.guild.id) if user.id != player.id]
+            view = PlayersDropdownView(self, user.id, player_list, option, self.set_challenge_callback)
+            content = f"You have `{format_number(player.chips)}` chips." \
+                f"\n\nYou chose game **{option}**.\n\nNow choose player: "
+            await interaction.response.edit_message(content=content, view=view)
+
+    async def set_challenge_callback(self, interaction: discord.Interaction, chosen_opponent, game_name):
+        user = interaction.user
+        player = await self.get_player(user)
+        if player and interaction.guild:
+            if chosen_opponent == "AI":
+                # AI/Bot chosen
+                bot_user: discord.User = self.bot.user  # type: ignore
+                chosen_member = await self.get_player(bot_user)
+                if chosen_member:
+                    game = next((game for game in self.get_games().values() if game.name == game_name), None)
+                    if game:
+                        bet_amount = 0
+                        new_game_session = RPSGameSession(game.id, player, self.players[chosen_member.id], game_name, bet_amount, interaction.channel)
+                        new_game_session.challenged_option = random.choice(["Rock", "Paper", "Scissors"])
+                        new_game_session.accepted = True
+                        new_game_session.started = True
+                        view = StartChallengeView(self, [new_game_session.get_player_ids()])
+                        message = await interaction.channel.send(embed=new_game_session.embed_message(), view=view)
+                        new_game_session.message = message
+                        self.views[message.id] = view
+
+                        self.active_games[player.id] = new_game_session
+                        self.active_games[chosen_member.id] = new_game_session
+                        await interaction.response.edit_message(delete_after=0)
+            else:
+                chosen_member = next((member for member in interaction.guild.members if member.name == chosen_opponent), None)
+                if chosen_member:
+                    game = next((game for game in self.get_games().values() if game.name == game_name), None)
+                    if game:
+                        bet_amount = 0
+                        new_game_session = RPSGameSession(game.id, player, self.players[chosen_member.id], game_name, bet_amount, interaction.channel)
+                        view = RPSView(self, [chosen_member.id])
+                        message = await interaction.channel.send(content=f"\n\n{chosen_member.mention} just got challenged by {user.mention} in a game of **{game_name}**", embed=new_game_session.embed_message(), view=view)
+                        new_game_session.message = message
+                        self.views[message.id] = view
+
+                        self.active_games[player.id] = new_game_session
+                        self.active_games[chosen_member.id] = new_game_session
+                        await interaction.response.edit_message(delete_after=0)
+
+    async def decline_challenge_callback(self, interaction: discord.Interaction):
+        if not await self._is_valid_interaction(interaction):
+            return
+        user = interaction.user
+
+        if user.id not in self.active_games:
+            await interaction.response.send_message(content="This challenge is not for you!", ephemeral=True)
+            return
+
+        game = self.active_games[user.id]
+        if game.challenged and game.challenged.id != user.id:
+            await interaction.response.send_message(content="Request is not for you.", ephemeral=True)
+            return
+
+        if game.declined or game.accepted:
+            await interaction.response.send_message(content="You already responded to this challenge!", ephemeral=True)
+            return
+
+        await game.decline()
+
+        await interaction.response.edit_message(content='', embed=game.embed_message(), view=None)
+
+    async def accept_challenge_callback(self, interaction: discord.Interaction):
+        if not await self._is_valid_interaction(interaction):
+            return
+        user = interaction.user
+
+        if user.id not in self.active_games:
+            await interaction.response.send_message(content="This challenge is not for you!", ephemeral=True)
+            return
+
+        game = self.active_games[user.id]
+        if game.challenged and game.challenged.id != user.id:
+            await interaction.response.send_message(content="Request is not for you.", ephemeral=True)
+            return
+
+        if game.declined or game.accepted:
+            await interaction.response.send_message(content="You already responded to this challenge!", ephemeral=True)
+            return
+
+        await game.accept()
+
+        view = StartChallengeView(self, [game.get_player_ids()])
+        await interaction.response.edit_message(embed=game.embed_message(), view=view)
+
+    async def game_rematch_callback(self, interaction: discord.Interaction):
+        if not await self._is_valid_interaction(interaction):
+            return
+
+        user = interaction.user
+        player = await self.get_player(user)
+        if player and interaction.guild:
+            new_game_session = self.active_games[user.id]
+            player, opponent_player = new_game_session.get_players(user.id)
+            if player != new_game_session.challenger:
+                # Incase if rematch is initiated by challenger
+                new_game_session.challenger = player
+                new_game_session.challenged = opponent_player
+                challenger_score = new_game_session.challenger_score
+                challenged_score = new_game_session.challenged_score
+                new_game_session.challenger_score = challenged_score
+                new_game_session.challenged_score = challenger_score
+
+            chosen_member = next((member for member in interaction.guild.members if member.name == opponent_player.name), None)
+            if new_game_session and chosen_member:
+                new_game_session.reset_game()
+                if self.bot.user and chosen_member.id == self.bot.user.id:
+                    new_game_session.challenged_option = random.choice(["Rock", "Paper", "Scissors"])
+                    new_game_session.accepted = True
+                    new_game_session.started = True
+                    view = StartChallengeView(self, [new_game_session.get_player_ids()])
+                else:
+                    view = RPSView(self, [chosen_member.id])
+
+                await interaction.response.edit_message(content=f"\n\n**Rematch!**", embed=new_game_session.embed_message(), view=view)
+
+    async def rps_choice_callback(self, interaction: discord.Interaction):
+        if not await self._is_valid_interaction(interaction):
+            return
+        user = interaction.user
+
+        view = RPSDropdownView(self, user.id, self.rps_game_callback)
+        await interaction.response.send_message("Choose an option:", view=view, ephemeral=True)
+
+    async def rps_game_callback(self, interaction: discord.Interaction, option):
+        user = interaction.user
+
+        if user.id in self.active_games:
+            game = self.active_games[user.id]
+            player, _ = game.get_players(user.id)
+            if player == game.challenger:
+                game.challenger_option = option
+            else:
+                game.challenged_option = option
+
+            player = await self.get_player(interaction.user)
+
+            game.check_winner()
+            await interaction.response.edit_message(delete_after=0)
+
+            if game.finished:
+                if player and interaction.guild:
+                    await game.restart_match(self)
+                    return
+
+            await game.update_message()
 
     async def _is_valid_interaction(self, interaction: discord.Interaction):
-        view = self.views.get(interaction.message.id)
+        if interaction.message:
+            view = self.views.get(interaction.message.id)
 
-        if view and not view.is_owner(interaction):
-            return False
+            if (isinstance(view, BaseView) or isinstance(view, DropdownBaseView)) and not view.is_owner(interaction):
+                return False
         return True
+
+    def get_players_from_server(self, server_id):
+        server = next((server for server in self.bot.guilds if server.id == server_id), None)
+        if server:
+            members_id_list = [member.id for member in server.members]
+            return [player for player_id, player in self.players.items() if player_id in members_id_list]
+        return []
 
     async def get_server_channels_from_db(self):
         async with aiosqlite.connect(SERVER_DB_LOCATION) as db:
@@ -985,6 +1448,20 @@ class IncrementalGameCog(commands.Cog):
                     self.items[item[0]] = Item(
                         item[0], item[1],
                         item[2])
+
+    async def get_games_from_db(self):
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT game_id, name
+            FROM games''') as cursor:
+
+                games = await cursor.fetchall()
+
+                self.games = {}
+                for game in games:
+                    self.games[game[0]] = Game(
+                        game[0], game[1]
+                    )
 
     async def get_skills_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -1270,6 +1747,40 @@ class IncrementalGameCog(commands.Cog):
                     player.add_item(item)
                     item.set_amount(amount)
 
+    async def get_player_chips_from_db(self, player_id):
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT player_id, amount
+            FROM player_chips
+            WHERE player_id = ?''', (player_id,)) as cursor:
+
+                player_chips = await cursor.fetchall()
+
+                for player_chip in player_chips:
+                    player_id, amount = player_chip
+                    player = self.players[int(player_id)]
+                    player.chips = amount
+
+    async def get_player_games_from_db(self, player_id):
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT player_id, game_id, played, wins, losses, amount_bet, earnings
+            FROM player_games
+            WHERE player_id = ?''', (player_id,)) as cursor:
+
+                player_games = await cursor.fetchall()
+
+                for player_game in player_games:
+                    player_id, game_id, played, wins, losses, amount_bet, earnings = player_game
+                    player = self.players[int(player_id)]
+                    new_game = self.games[game_id].copy()
+                    new_game.played = played
+                    new_game.wins = wins
+                    new_game.losses = losses
+                    new_game.amount_bet = amount_bet
+                    new_game.earnings = earnings
+                    player.games[game_id] = new_game
+
     async def get_player_skills_from_db(self, player_id):
         await self.get_skills_from_db()
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -1303,47 +1814,59 @@ class IncrementalGameCog(commands.Cog):
                     upgrade = self.upgrades[upgrade_id].copy()
                     player.add_upgrade(upgrade, count)
 
-    async def get_player_from_db(self, player_id):
+    async def get_player_from_db(self, user: discord.User | discord.Member):
+        player_id = user.id
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             async with db.execute('''
-            SELECT player_id, player_display_name, start_date, last_update_time
+            SELECT player_id, player_name, player_display_name, start_date, last_update_time
             FROM players
             WHERE player_id = ?''', (player_id,)) as cursor:
 
                 found_player = await cursor.fetchone()
 
                 if found_player:
-                    player_id, display_name, start_date, last_update_time = found_player
-                    player = Player(player_id, display_name)
+                    player_id, name, display_name, start_date, last_update_time = found_player
+                    player = Player(player_id, name, display_name)
                     player.last_update_time = datetime.fromisoformat(last_update_time)
                     player.start_date = datetime.fromisoformat(start_date)
                     self.players[int(player_id)] = player
+
                     await self.get_player_upgrades_from_db(player_id)
                     await self.get_player_items_from_db(player_id)
                     await self.get_player_skills_from_db(player_id)
                     await self.get_player_energies_from_db(player_id)
                     await self.get_player_activities_from_db(player_id)
+                    await self.get_player_chips_from_db(player_id)
+                    await self.get_player_games_from_db(player_id)
+
                     self.recalculate_player_modifiers(player)
 
-                    await self.update_player(player)
+                    await self.update_player(user)
                     return player
                 else:
                     return None
 
-    async def get_player(self, player_id: int):
+    async def get_player(self, user: discord.User | discord.Member):
+        player_id = user.id
+        # check if we are trying to get the bot instead of another user
+        if self.bot.user:
+            if player_id == self.bot.user.id:
+                if player_id not in self.players:
+                    await self.register_player(user)
+                return self.players[int(player_id)]
+
         if player_id not in self.players:
-            player = await self.get_player_from_db(player_id)
+            player = await self.get_player_from_db(user)
             if player:
                 self.players[int(player_id)] = player
                 return player
             else:
                 return None
         else:
-            await self.player_to_database_update(player_id)
+            await self.player_to_database_update(user)
             return self.players[int(player_id)]
 
     def recalculate_player_modifiers(self, player: Player):
-
         # reset item capacity
         for item_id, player_item in player.items.items():
             baseline_item = next((item for item in self.get_items().values() if item_id == item.id), None)
@@ -1364,13 +1887,15 @@ class IncrementalGameCog(commands.Cog):
         player.apply_item_modifiers()
         player.apply_energy_modifiers()
 
-    async def update_player(self, player: Player):
-        current_time = datetime.now()
-        player.update(current_time)
+    async def update_player(self, user: discord.User | discord.Member):
+        player = await self.get_player(user)
+        if player:
+            current_time = datetime.now()
+            player.update(current_time)
 
-        self.recalculate_player_modifiers(player)
+            self.recalculate_player_modifiers(player)
 
-        await self.player_to_database_update(player.id)
+            await self.player_to_database_update(user)
 
     def complete_task(self, task: Task, player: Player):
         can_afford = True
@@ -1396,7 +1921,7 @@ class IncrementalGameCog(commands.Cog):
             get_item = next((item for item in player.items.values() if item.name.lower() == output["item"].lower()), None)
             if get_item:
                 if get_item.amount < get_item.capacity:
-                    get_item.add_amount(output["amount"])
+                    get_item.increase_amount(output["amount"])
 
         for key, item, cost in cost_list:
             if key == "energy":
@@ -1404,142 +1929,45 @@ class IncrementalGameCog(commands.Cog):
             if key == "item":
                 item.amount -= cost
 
-    async def player_to_database_update(self, player_id):
+    async def player_to_database_update(self, user: discord.User | discord.Member):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            player_id = user.id
             player = self.players[int(player_id)]
+            player.name = user.name
+            player.display_name = user.display_name
             player_upgrades = [(id, upgrade.count) for id, upgrade in player.upgrades.items()]
             player_items = [(id, item.amount) for id, item in player.items.items()]
+            player_chips = player.chips
             player_activity = player.current_activity
             player_skills = [(id, skill.current_level, skill.current_exp) for id, skill in player.skills.items()]
             player_energies = [(id, energy.current_energy) for id, energy in player.energies.items()]
+            player_games = [(id, game.played, game.wins, game.losses, game.amount_bet, game.earnings) for id, game in player.games.items()]
 
             await db.execute('BEGIN')
 
-            await self.update_player_upgrades(db, player_id, player_upgrades)
-            await self.update_player_items(db, player_id, player_items)
-            await self.update_player_skills(db, player_id, player_skills)
-            await self.update_player_activities(db, player_id, player_activity)
-            await self.update_player_energies(db, player_id, player_energies)
-            await self.update_player_data(db, player_id, player)
+            await update_player_upgrades(db, player_id, player_upgrades)
+            await update_player_items(db, player_id, player_items)
+            await update_player_skills(db, player_id, player_skills)
+            await update_player_activities(db, player_id, player_activity)
+            await update_player_energies(db, player_id, player_energies)
+            await update_player_chips(db, player_id, player_chips)
+            await update_player_games(db, player_id, player_games)
+            await update_player_data(db, player_id, player)
 
             await db.commit()
 
-    async def update_player_upgrades(self, db, player_id, player_upgrades):
-        placeholders_upgrades = ', '.join('?' for _ in player_upgrades)
-
-        # Clear all upgrades that player doesn't have anymore
-        if player_upgrades:
-            query = f"DELETE FROM player_upgrades WHERE player_id = ? AND upgrade_id NOT IN ({placeholders_upgrades})"
-            params_upgrades = [player_id] + [upgrade[0] for upgrade in player_upgrades]
-            await db.execute(query, params_upgrades)
-        else:
-            await db.execute("DELETE FROM player_upgrades WHERE player_id = ?", (player_id,))
-
-        # Add or update changed upgrades
-        for player_upgrade in player_upgrades:
-            await db.execute('''
-                INSERT OR REPLACE INTO player_upgrades (player_id, upgrade_id, count)
-                VALUES (?, ?, ?)
-            ''', (player_id, player_upgrade[0], player_upgrade[1]))
-
-    async def update_player_items(self, db, player_id, player_items):
-        placeholders_items = ', '.join('?' for _ in player_items)
-
-        # Clear all items that player doesn't have anymore
-        if player_items:
-            query = f"DELETE FROM player_items WHERE player_id = ? AND item_id NOT IN ({placeholders_items})"
-            params_items = [player_id] + [item[0] for item in player_items]
-            await db.execute(query, params_items)
-        else:
-            await db.execute("DELETE FROM player_items WHERE player_id = ?", (player_id,))
-
-        # Add or update changed items
-        for player_item in player_items:
-            await db.execute('''
-                INSERT OR REPLACE INTO player_items (player_id, item_id, amount)
-                VALUES (?, ?, ?)
-            ''', (player_id, player_item[0], player_item[1]))
-
-    async def update_player_energies(self, db, player_id, player_energies):
-        placeholders_energies = ', '.join('?' for _ in player_energies)
-
-        # Clear all energies that the player doesn't have anymore
-        if player_energies:
-            query = f"DELETE FROM player_energies WHERE player_id = ? AND energy_id NOT IN ({placeholders_energies})"
-            params_energies = [player_id] + [energy[0] for energy in player_energies]
-            await db.execute(query, params_energies)
-        else:
-            await db.execute("DELETE FROM player_energies WHERE player_id = ?", (player_id,))
-
-        # Add or update the player's energies
-        for energy_id, current_energy in player_energies:
-            await db.execute('''
-                INSERT OR REPLACE INTO player_energies (player_id, energy_id, current_energy)
-                VALUES (?, ?, ?)
-            ''', (player_id, energy_id, current_energy))
-
-    async def update_player_skills(self, db, player_id, player_skills):
-        placeholders_skills = ', '.join('?' for _ in player_skills)
-
-        # Clear all skills that the player doesn't have anymore
-        if player_skills:
-            query = f"DELETE FROM player_skills WHERE player_id = ? AND skill_id NOT IN ({placeholders_skills})"
-            params_skills = [player_id] + [skill[0] for skill in player_skills]
-            await db.execute(query, params_skills)
-        else:
-            await db.execute("DELETE FROM player_skills WHERE player_id = ?", (player_id,))
-
-        # Add or update the player's skills
-        for skill_id, current_level, current_exp in player_skills:
-            await db.execute('''
-                INSERT OR REPLACE INTO player_skills (player_id, skill_id, current_level, current_exp)
-                VALUES (?, ?, ?, ?)
-            ''', (player_id, skill_id, current_level, current_exp))
-
-    async def update_player_activities(self, db, player_id, player_activity):
-        # Clear all activities that player doesn't have anymore
-        if player_activity is not None:
-            query = "DELETE FROM player_activities WHERE player_id = ? AND activity_id != ?"
-            params_activities = [player_id, player_activity.id]
-            await db.execute(query, params_activities)
-        else:
-            await db.execute("DELETE FROM player_activities WHERE player_id = ?", (player_id,))
-
-        # Add or update changed activities
-        if player_activity:
-            await db.execute('''
-                INSERT OR REPLACE INTO player_activities (player_id, activity_id)
-                VALUES (?, ?)
-            ''', (player_id, player_activity.id))
-
-    async def update_player_data(self, db, player_id, player):
-        # Check if the player exists in the database
-        async with db.execute('SELECT 1 FROM players WHERE player_id = ?', (player_id,)) as cursor:
-            found_player = await cursor.fetchone()
-
-        if found_player:
-            await db.execute('''
-            UPDATE players
-            SET player_display_name = ?, start_date = ?, last_update_time = ?
-            WHERE player_id == ?
-            ''', (player.display_name, player.start_date, player.last_update_time, player_id))
-        else:
-            await db.execute('''
-            INSERT INTO players (player_id, player_display_name, start_date, last_update_time)
-            VALUES (?, ?, ?, ?)
-            ''', (player_id, player.display_name, player.start_date, player.last_update_time))
-
-    async def register_player(self, player_id: int, display_name: str):
-        new_player = Player(player_id, display_name)
+    async def register_player(self, user: discord.User | discord.Member):
+        new_player = Player(user.id, user.name, user.display_name)
         new_player.add_item(self.items[0].copy())
         new_player.add_skill(self.skills[0].copy())
         new_player.add_energy(self.energies[0].copy())
         new_player.add_upgrade(self.upgrades[0].copy())
+        new_player.games = self.get_games()
 
-        self.players[int(player_id)] = new_player
+        self.players[user.id] = new_player
 
         self.recalculate_player_modifiers(new_player)
-        await self.player_to_database_update(player_id)
+        await self.player_to_database_update(user)
 
     def player_stats_embed_message(self, player):
         embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
@@ -1623,9 +2051,10 @@ class IncrementalGameCog(commands.Cog):
                         can_afford_emoji = "✅"
 
                     missing_upgrades_text.append(
-                        f"**{upgrade.name}** {can_afford_emoji}\n"
-                        f"• Cost: `{upgrade.cost} {upgrade.cost_material}`\n"
-                        f"• Remaining: `{upgrades_left}`"
+                        f"**{upgrade.name}** {can_afford_emoji}"
+                        f"\n{upgrade.description}"
+                        f"\n• Cost: `{upgrade.cost} {upgrade.cost_material}`"
+                        f"\n• Remaining: `{upgrades_left}`"
                         f"{self.format_upgrade_text(upgrade)}"
                     )
 
@@ -1718,7 +2147,7 @@ class IncrementalGameCog(commands.Cog):
 
         embed = discord.Embed(
             title=f"🏃 Available Activities - Page {page}/{pages}",
-            description="You can select an activity here and you will continously do it.",
+            description="Activities are **passive** actions.\nSelected activity runs all the time.",
             color=embed_color
         )
 
@@ -1876,7 +2305,7 @@ class IncrementalGameCog(commands.Cog):
 
         return activities_list
 
-    def get_available_tasks(self, player) -> list[tuple[Task]]:
+    def get_available_tasks(self, player) -> list[Task]:
         tasks_list = []
         for task in self.tasks.values():
             if task.unlock_conditions:
@@ -1951,7 +2380,7 @@ async def tree_sync(ctx):
     print("Tree is synchronized")
 
 
-def format_time(time_in_seconds):
+def format_time(time_in_seconds: float):
     seconds = int(time_in_seconds)
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
@@ -1971,7 +2400,7 @@ def format_time(time_in_seconds):
     return " ".join(time_string)
 
 
-def format_number(number, sig_figs=3):
+def format_number(number: float, sig_figs=3):
     prefixes = {
         0: '',
         3: 'K',
@@ -2002,542 +2431,12 @@ def format_number(number, sig_figs=3):
         return value_str
 
 
-async def create_energies_table(db_location):
-    async with aiosqlite.connect(db_location) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS energies (
-                energy_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                max_energy REAL,
-                recovery_rate REAL
-        )
-        ''')
-        await db.commit()
-
-
-async def create_player_energies_table(db_location):
-    async with aiosqlite.connect(db_location) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS player_energies (
-                player_id INTEGER,
-                energy_id INTEGER,
-                current_energy REAL,
-                PRIMARY KEY (player_id, energy_id),
-                FOREIGN KEY (energy_id) REFERENCES energies(energy_id)
-        )
-        ''')
-        await db.commit()
-
-
-async def create_skills_table(db_location):
-    async with aiosqlite.connect(db_location) as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS skills (
-                skill_id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT,
-                start_level INTEGER NOT NULL,
-                max_level INTEGER NOT NULL,
-                base_exp_requirement REAL NOT NULL,
-                scaling_factor REAL NOT NULL,
-                exp_formula TEXT
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS skill_effects (
-            id INTEGER PRIMARY KEY,
-            skill_id INTEGER NOT NULL,
-            stat TEXT NOT NULL,
-            modifier_type TEXT NOT NULL,
-            modifier_value REAL NOT NULL,
-            UNIQUE (skill_id, stat, modifier_type),
-            FOREIGN KEY (skill_id) REFERENCES skills (skill_id) ON DELETE CASCADE
-        )
-        ''')
-        await db.commit()
-
-
-async def create_player_skills_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS player_skills (
-            player_id INTEGER NOT NULL,
-            skill_id INTEGER NOT NULL,
-            current_level INTEGER NOT NULL,
-            current_exp REAL NOT NULL,
-            PRIMARY KEY (player_id, skill_id),
-            FOREIGN KEY (skill_id) REFERENCES skills(skill_id)
-        )
-        ''')
-        await db.commit()
-
-
-async def create_player_activities_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS player_activities (
-            player_id INTEGER NOT NULL,
-            activity_id INTEGER NOT NULL,
-            PRIMARY KEY (player_id, activity_id),
-            FOREIGN KEY (activity_id) REFERENCES activities(activity_id)
-        )
-        ''')
-        await db.commit()
-
-
-async def create_activities_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS activities (
-            activity_id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            icon TEXT,
-            output_item TEXT NOT NULL,
-            output_amount REAL NOT NULL,
-            energy_type TEXT,
-            energy_drain_rate REAL,
-            skill TEXT,
-            skill_exp_rate REAL,
-            unlock_conditions TEXT,
-            description TEXT,
-            status_description TEXT
-        )
-        ''')
-        await db.commit()
-
-
-async def create_player_tasks_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS player_tasks (
-            player_id INTEGER NOT NULL,
-            task_id INTEGER NOT NULL,
-            count INTEGER NOT NULL DEFAULT 1,
-            PRIMARY KEY (player_id, task_id),
-            FOREIGN KEY (task_id) REFERENCES tasks(task_id)
-        )
-        ''')
-        await db.commit()
-
-
-async def create_player_upgrades_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS player_upgrades (
-            player_id INTEGER NOT NULL,
-            upgrade_id INTEGER NOT NULL,
-            count INTEGER NOT NULL DEFAULT 1,
-            PRIMARY KEY (player_id, upgrade_id),
-            FOREIGN KEY (upgrade_id) REFERENCES upgrades(upgrade_id)
-        )
-        ''')
-        await db.commit()
-
-
-async def create_tasks_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS tasks (
-            task_id INTEGER PRIMARY KEY,
-            name TEXT UNIQUE,
-            icon TEXT,
-            task_amount INTEGER,
-            description TEXT
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS task_outputs (
-            id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL,
-            output_item TEXT NOT NULL,
-            output_amount REAL NOT NULL,
-            FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS task_costs (
-            id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL,
-            cost_item TEXT NOT NULL,
-            cost_amount REAL NOT NULL,
-            FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS task_energy_costs (
-            id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL,
-            energy_type TEXT NOT NULL,
-            energy_amount REAL NOT NULL,
-            FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS task_unlocks (
-            id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL,
-            condition TEXT NOT NULL,
-            UNIQUE (task_id, condition),
-            FOREIGN KEY (task_id) REFERENCES tasks (task_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS task_effects (
-            id INTEGER PRIMARY KEY,
-            task_id INTEGER NOT NULL,
-            stat TEXT NOT NULL,
-            modifier_type TEXT NOT NULL,
-            modifier_value REAL NOT NULL,
-            UNIQUE (task_id, stat, modifier_type),
-            FOREIGN KEY (task_id) REFERENCES tasks (task_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS task_unlock_conditions (
-            task_id INTEGER,
-            condition TEXT,
-            PRIMARY KEY (task_id, condition),
-            FOREIGN KEY (task_id) REFERENCES tasks (task_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.commit()
-
-
-async def create_upgrades_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS upgrades (
-            upgrade_id INTEGER PRIMARY KEY,
-            name TEXT UNIQUE,
-            stat TEXT,
-            modifier_type TEXT,
-            modifier_value INTEGER,
-            cost_material TEXT,
-            cost INTEGER,
-            max_purchases INTEGER,
-            description TEXT
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS upgrade_unlocks (
-            id INTEGER PRIMARY KEY,
-            upgrade_id INTEGER NOT NULL,
-            condition TEXT NOT NULL,
-            UNIQUE (upgrade_id, condition),
-            FOREIGN KEY (upgrade_id) REFERENCES upgrades (upgrade_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS upgrade_effects (
-            id INTEGER PRIMARY KEY,
-            upgrade_id INTEGER NOT NULL,
-            stat TEXT NOT NULL,
-            modifier_type TEXT NOT NULL,
-            modifier_value REAL NOT NULL,
-            UNIQUE (upgrade_id, stat, modifier_type),
-            FOREIGN KEY (upgrade_id) REFERENCES upgrades (upgrade_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS upgrade_unlock_conditions (
-            upgrade_id INTEGER,
-            condition TEXT,
-            PRIMARY KEY (upgrade_id, condition),
-            FOREIGN KEY (upgrade_id) REFERENCES upgrades (upgrade_id) ON DELETE CASCADE
-        )
-        ''')
-
-        await db.commit()
-
-
-async def create_player_items_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS player_items (
-            player_id INTEGER NOT NULL,
-            item_id INTEGER NOT NULL,
-            amount DOUBLE NOT NULL DEFAULT 0,
-            PRIMARY KEY (player_id, item_id),
-            FOREIGN KEY (item_id) REFERENCES items(item_id)
-        )
-        ''')
-        await db.commit()
-
-
-async def create_items_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-        CREATE TABLE IF NOT EXISTS items (
-            item_id INTEGER PRIMARY KEY,
-            name TEXT UNIQUE NOT NULL,
-            default_capacity INTEGER
-        )
-        ''')
-        await db.commit()
-
-
-async def create_players_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS players (
-                player_id INTEGER PRIMARY KEY,
-                player_display_name TEXT NOT NULL,
-                start_date TEXT,
-                last_update_time TEXT
-            )
-        ''')
-        await db.commit()
-
-
-async def create_server_channel_table(database_location):
-    async with aiosqlite.connect(database_location) as db:
-        # Create a table if it doesn't exist
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS servers (
-                server_id BIGINT PRIMARY KEY,
-                server_name TEXT
-            )
-        ''')
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS channels (
-                channel_id BIGINT PRIMARY KEY,
-                server_id BIGINT,
-                channel_name TEXT,
-                FOREIGN KEY (server_id) REFERENCES servers(server_id)
-            )
-        ''')
-        await db.commit()
-
-
-async def update_energies_from_json_to_db(database_location):
-    with open(os.path.join(game_data_folder, 'energies.json'), encoding='utf-8') as file:
-        energies_data = json.load(file)
-
-    async with aiosqlite.connect(database_location) as db:
-        for energy in energies_data:
-            await db.execute('''
-                INSERT OR REPLACE INTO energies (energy_id, name, max_energy, recovery_rate)
-                VALUES (?, ?, ?, ?)
-            ''', (energy['id'], energy['name'], energy['max_energy'], energy['recovery_rate']))
-        await db.commit()
-
-
-async def update_skills_from_json_to_db(database_location):
-    with open(os.path.join(game_data_folder, 'skills.json'), encoding='utf-8') as file:
-        skills_data = json.load(file)
-
-    async with aiosqlite.connect(database_location) as db:
-        for skill in skills_data:
-            await db.execute('''
-                INSERT OR REPLACE INTO skills (skill_id, name, description, start_level, max_level, base_exp_requirement, scaling_factor, exp_formula)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (skill['id'], skill['name'], skill['description'], skill['start_level'], skill['max_level'], skill['base_exp_requirement'], skill['scaling_factor'], skill['exp_formula']))
-
-            if 'effects' in skill and skill['effects']:
-                for stat, effect in skill['effects'].items():
-                    await db.execute('''
-                        INSERT OR REPLACE INTO skill_effects (
-                            skill_id, stat, modifier_type, modifier_value
-                        )
-                        VALUES (?, ?, ?, ?)
-                    ''', (
-                        skill['id'], stat, effect['modifier_type'], effect['modifier_value']
-                    ))
-
-        await db.commit()
-
-
-async def update_activities_from_json_to_db(database_location):
-    with open(os.path.join(game_data_folder, 'activities.json'), encoding='utf-8') as file:
-        activities = json.load(file)
-
-    async with aiosqlite.connect(database_location) as db:
-        for activity in activities:
-            await db.execute('''
-                INSERT OR REPLACE INTO activities (activity_id, name, icon, output_item, output_amount, energy_type, energy_drain_rate, skill, skill_exp_rate, unlock_conditions, description, status_description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (activity['id'], activity['name'], activity['icon'],
-                  activity['output_item'], activity['output_amount'],
-                  activity['energy_type'],
-                  activity['energy_drain_rate'],
-                  activity['skill'],
-                  activity['skill_exp_rate'],
-                  ','.join(activity['unlock_conditions']),
-                  activity['description'],
-                  activity['status_description']))
-        await db.commit()
-
-
-async def update_items_from_json_to_db(database_location):
-    with open(os.path.join(game_data_folder, 'items.json')) as file:
-        items = json.load(file)
-
-    async with aiosqlite.connect(database_location) as db:
-        for item in items:
-            await db.execute('''
-                INSERT OR IGNORE INTO items (item_id, name, default_capacity)
-                VALUES (?, ?, ?)
-            ''', (item['id'], item['name'], item['capacity']))
-
-        await db.commit()
-
-
-async def update_tasks_from_json_to_db(database_location):
-    with open(os.path.join(game_data_folder, 'tasks.json'), encoding='utf-8') as file:
-        tasks = json.load(file)
-
-    async with aiosqlite.connect(database_location) as db:
-        for task in tasks:
-            await db.execute('''
-                INSERT OR REPLACE INTO tasks (task_id, name, icon,
-                task_amount, description)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (task['id'], task['name'], task['icon'],
-                  task['task_amount'],  task['description']))
-
-            await db.execute('DELETE FROM task_outputs WHERE task_id = ?', (task['id'],))
-            for output in task['outputs']:
-                await db.execute('''
-                    INSERT INTO task_outputs (task_id, output_item, output_amount)
-                    VALUES (?, ?, ?)
-                ''', (task['id'], output['item'], output['amount']))
-
-            await db.execute('DELETE FROM task_costs WHERE task_id = ?', (task['id'],))
-            for cost in task['costs']:
-                await db.execute('''
-                    INSERT INTO task_costs (task_id, cost_item, cost_amount)
-                    VALUES (?, ?, ?)
-                ''', (task['id'], cost['item'], cost['amount']))
-
-            await db.execute('DELETE FROM task_energy_costs WHERE task_id = ?', (task['id'],))
-            for energy_cost in task['energy_costs']:
-                await db.execute('''
-                    INSERT INTO task_energy_costs (task_id, energy_type, energy_amount)
-                    VALUES (?, ?, ?)
-                ''', (task['id'], energy_cost['energy'], energy_cost['amount']))
-
-            if 'effects' in task and task['effects']:
-                for stat, effect in task['effects'].items():
-                    await db.execute('''
-                        INSERT OR REPLACE INTO task_effects (
-                            task_id, stat, modifier_type, modifier_value
-                        )
-                        VALUES (?, ?, ?, ?)
-                    ''', (
-                        task['id'], stat, effect['modifier_type'], effect['modifier_value']
-                    ))
-
-            if task['unlocks']:
-                for condition in task['unlocks']:
-                    async with db.execute('''
-                        SELECT 1 FROM task_unlocks WHERE task_id = ? AND condition = ?
-                    ''', (task['id'], condition)) as cursor:
-                        exists = await cursor.fetchone()
-
-                    if not exists:
-                        await db.execute('''
-                            INSERT OR REPLACE INTO task_unlocks (task_id, condition)
-                            VALUES (?, ?)
-                        ''', (task['id'], condition))
-
-            if task['unlock_conditions']:
-                for condition in task['unlock_conditions']:
-                    async with db.execute('''
-                        SELECT 1 FROM task_unlock_conditions WHERE task_id = ? AND condition = ?
-                    ''', (task['id'], condition)) as cursor:
-                        exists = await cursor.fetchone()
-
-                    if not exists:
-                        await db.execute('''
-                            INSERT OR REPLACE INTO task_unlock_conditions (task_id, condition)
-                            VALUES (?, ?)
-                        ''', (task['id'], condition))
-
-            await db.commit()
-
-
-async def update_upgrades_from_json_to_db(database_location):
-    with open(os.path.join(game_data_folder, 'upgrades.json')) as file:
-        upgrades = json.load(file)
-
-    async with aiosqlite.connect(database_location) as db:
-        for upgrade in upgrades:
-            await db.execute('''
-                INSERT OR REPLACE INTO upgrades (upgrade_id, name,
-                cost_material, cost, max_purchases,
-                description)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (upgrade['id'], upgrade['name'],
-                  upgrade['cost_material'], upgrade['cost'],
-                  upgrade['max_purchases'], upgrade['description']))
-
-            if 'effects' in upgrade and upgrade['effects']:
-                for stat, effect in upgrade['effects'].items():
-                    await db.execute('''
-                        INSERT OR REPLACE INTO upgrade_effects (
-                            upgrade_id, stat, modifier_type, modifier_value
-                        )
-                        VALUES (?, ?, ?, ?)
-                    ''', (
-                        upgrade['id'], stat, effect['modifier_type'], effect['modifier_value']
-                    ))
-
-            if upgrade['unlocks']:
-                for condition in upgrade['unlocks']:
-                    async with db.execute('''
-                        SELECT 1 FROM upgrade_unlocks WHERE upgrade_id = ? AND condition = ?
-                    ''', (upgrade['id'], condition)) as cursor:
-                        exists = await cursor.fetchone()
-
-                    if not exists:
-                        await db.execute('''
-                            INSERT OR REPLACE INTO upgrade_unlocks (upgrade_id, condition)
-                            VALUES (?, ?)
-                        ''', (upgrade['id'], condition))
-
-            if upgrade['unlock_conditions']:
-                for condition in upgrade['unlock_conditions']:
-                    async with db.execute('''
-                        SELECT 1 FROM upgrade_unlock_conditions WHERE upgrade_id = ? AND condition = ?
-                    ''', (upgrade['id'], condition)) as cursor:
-                        exists = await cursor.fetchone()
-
-                    if not exists:
-                        await db.execute('''
-                            INSERT OR REPLACE INTO upgrade_unlock_conditions (upgrade_id, condition)
-                            VALUES (?, ?)
-                        ''', (upgrade['id'], condition))
-
-            await db.commit()
-
-
-async def setup(bot):
+async def setup(bot: commands.Bot):
     global tree
     tree = bot.tree
     bot.add_command(tree_sync)
 
-    # create table if not exist
+    # create table if doesn't exist
 
     await create_server_channel_table(SERVER_DB_LOCATION)
 
@@ -2567,6 +2466,12 @@ async def setup(bot):
     await update_tasks_from_json_to_db(GAME_DB_LOCATION)
     await create_player_tasks_table(GAME_DB_LOCATION)
 
+    await create_games_table(GAME_DB_LOCATION)
+    await update_games_from_json_to_db(GAME_DB_LOCATION)
+    await create_player_games_table(GAME_DB_LOCATION)
+
+    await create_player_chips_table(GAME_DB_LOCATION)
+
     game_cog = IncrementalGameCog(bot)
     await bot.add_cog(game_cog)
 
@@ -2578,5 +2483,6 @@ async def setup(bot):
     await game_cog.get_skills_from_db()
     await game_cog.get_energies_from_db()
     await game_cog.get_activities_from_db()
+    await game_cog.get_games_from_db()
 
     game_cog.initialize()
