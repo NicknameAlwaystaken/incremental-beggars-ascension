@@ -282,5 +282,17 @@
                 "modifier_value": 1.2
             }
         }
+    },
+    {
+        "id": "18",
+        "name": "Wheelbarrow",
+        "cost_material": "coins",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlock_conditions": [],
+        "unlocks": ["mining"],
+        "description": "One handle broken. This will be tough.",
+        "effects": {
+        }
     }
 ]

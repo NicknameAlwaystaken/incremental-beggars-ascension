@@ -71,16 +71,16 @@
     },
     {
         "id": 5,
-        "name": "Cheat for testing",
-        "icon": "",
+        "name": "Wheelbarrow Gravel",
+        "icon": "🛒",
         "output_item": "coins",
-        "output_amount": 1,
+        "output_amount": 0.2,
         "energy_type": "energy",
-        "energy_drain_rate": 0.1,
-        "skill": "",
-        "skill_exp_rate": 0,
-        "unlock_conditions": [],
-        "description": "Cheat for testing",
-        "status_description": "CHEATING OMG!!!!."
+        "energy_drain_rate": 0.3,
+        "skill": "mining",
+        "skill_exp_rate": 0.25,
+        "unlock_conditions": ["mining"],
+        "description": "We need more gravel! Bring me some gravel.",
+        "status_description": "With your new wheelbarrow, you found a new job!"
     }
 ]

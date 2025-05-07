@@ -32,7 +32,7 @@ TASKS_PER_PAGE = 5
 
 UPGRADES_PER_PAGE = 4
 
-PRESHOW_BASIC_UNLOCKS = ["thieving", "fishing", "manual labour", "farming"]
+PRESHOW_BASIC_UNLOCKS = ["thieving", "fishing", "manual labour", "farming", "mining"]
 
 
 class Game:

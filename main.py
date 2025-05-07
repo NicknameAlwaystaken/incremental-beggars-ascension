@@ -9,13 +9,16 @@ import asyncio
 # Load the .env file
 _ = load_dotenv()
 
-testing = True
+mode = sys.argv[1] if len(sys.argv) > 1 else "test"
 
-# Get the token from the .env file
-if testing:
+if mode == "test":
     TOKEN = os.getenv("DISCORD_TOKEN_TEST")
-else:
+    print("Launching Test Bot")
+elif mode == "stable":
+    print("Launching Stable Bot")
     TOKEN = os.getenv("DISCORD_TOKEN_STABLE")
+else:
+    raise ValueError("Invalid mode. Use 'test' or 'stable'.")
 
 if TOKEN is None:
     print("Token not found. Exiting.")
