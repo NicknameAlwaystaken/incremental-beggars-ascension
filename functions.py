@@ -849,7 +849,10 @@ class IncrementalGameCog(commands.Cog):
 
         self.initialized = False
 
+        # I can't think of any better ways to do..
+        # check without using global variable
         self.play = commands.check(self.is_allowed_channel)(self.play_command)
+        self.game = commands.check(self.is_allowed_channel)(self.start_game_command)
 
     def initialize(self):
         self.initialized = True
