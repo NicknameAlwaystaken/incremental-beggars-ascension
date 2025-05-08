@@ -836,7 +836,7 @@ class IncrementalGameCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot: commands.Bot = bot
         self.players: dict[int, Player] = {}
-        self.upgrades: dict[int,  Upgrade] = {}
+        self.upgrades: dict[int, Upgrade] = {}
         self.activities: dict[int, Activity] = {}
         self.skills: dict[int, Skill] = {}
         self.energies: dict[int, Energy] = {}
@@ -944,7 +944,7 @@ class IncrementalGameCog(commands.Cog):
 
     @commands.hybrid_command(name="game", with_app_command=True)
     async def start_game_command(self, ctx):
-        """Game menu, you can play games for fun or with a gamble!"""
+        """Game menu, you can play games for fun or to gamble!"""
         if not self.initialized:
             print("Not done initializing!")
             return
@@ -1084,10 +1084,10 @@ class IncrementalGameCog(commands.Cog):
         self.views[message.id] = view
 
     async def shop_menu_callback(self, interaction: discord.Interaction, page=1):
-        user = interaction.user
         if not await self._is_valid_interaction(interaction):
             return
 
+        user = interaction.user
         player = await self.get_player(user)
         if player:
             await self.update_player(user)
