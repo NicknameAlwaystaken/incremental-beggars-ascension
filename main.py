@@ -39,7 +39,7 @@ bot: commands.Bot = commands.Bot(command_prefix=prefix, intents=intents)
 
 # Load the cogs
 # asyncio.run(bot.load_extension("server_setup"))
-asyncio.run(bot.load_extension("functions"))
+asyncio.run(bot.load_extension("setup"))
 
 # Run the bot
 bot.run(TOKEN)

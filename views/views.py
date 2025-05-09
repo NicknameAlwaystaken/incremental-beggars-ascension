@@ -1,3 +1,4 @@
+from __future__ import annotations
 import discord
 from functools import partial
 
@@ -33,47 +34,53 @@ class BaseView(discord.ui.View):
 
 
 class MainMenuView(BaseView):
-    def __init__(self, cog, user_id):
+    def __init__(self, cog, user_id, *, activities_cb, tasks_cb, shop_cb, update_cb):
         super().__init__(cog, user_id)
-        self.create_main_menu()
+        self.create_main_menu(
+            activities_cb=activities_cb,
+            tasks_cb=tasks_cb,
+            shop_cb=shop_cb,
+            update_cb=update_cb,
+        )
 
-    def create_main_menu(self):
+    def create_main_menu(self, *, activities_cb, tasks_cb, shop_cb, update_cb):
         self.clear_items()
 
         # Activities button
         activities_button = discord.ui.Button(label='Activities', style=discord.ButtonStyle.primary)
-        activities_button.callback = self.cog.activities_menu_callback
+        activities_button.callback = partial(activities_cb, self.cog)
         self.add_item(activities_button)
 
         # Tasks button
         tasks_button = discord.ui.Button(label='Tasks', style=discord.ButtonStyle.primary)
-        tasks_button.callback = self.cog.tasks_menu_callback
+        tasks_button.callback = partial(tasks_cb, self.cog)
+
         self.add_item(tasks_button)
 
         # Shop button
         shop_button = discord.ui.Button(label='Shop', style=discord.ButtonStyle.primary)
-        shop_button.callback = self.cog.shop_menu_callback
+        shop_button.callback = partial(shop_cb, self.cog)
         self.add_item(shop_button)
 
         # Update button
-        self.add_update_button(self.cog.main_menu_callback)
+        self.add_update_button(partial(update_cb, self.cog))
 
-    def create_register_menu(self):
+    def create_register_menu(self, register_cb):
         self.clear_items()
 
         register_button = discord.ui.Button(label='Register', style=discord.ButtonStyle.success)
-        register_button.callback = self.cog.register_callback
+        register_button.callback = partial(register_cb, self.cog)
         self.add_item(register_button)
 
 
 class ShopMenuView(BaseView):
-    def __init__(self, cog, user_id, player, upgrades_per_page, page=1):
+    def __init__(self, cog, user_id, player, upgrades_per_page, page=1, *, shop_cb, back_cb, buy_upgrade_cb):
         super().__init__(cog, user_id)
         if page < 1:
             page = 1
-        self.create_shop_menu(player, upgrades_per_page, page)
+        self.create_shop_menu(player, upgrades_per_page, page, shop_cb, back_cb, buy_upgrade_cb)
 
-    def create_shop_menu(self, player, upgrades_per_page, page=1):
+    def create_shop_menu(self, player, upgrades_per_page, page, shop_cb, back_cb, buy_upgrade_cb):
         self.clear_items()
         missing_upgrades = self.cog.get_missing_upgrades(player)
         upgrades_count = 0
@@ -88,28 +95,26 @@ class ShopMenuView(BaseView):
                 item = next((item for item in player.items.values() if item.name == upgrade.cost_material), None)
                 button_style = discord.ButtonStyle.success if item and item.amount >= upgrade.cost else discord.ButtonStyle.secondary
                 buy_button = discord.ui.Button(label=f'Buy {upgrade.name}', style=button_style)
-                buy_button.callback = partial(self.cog.buy_upgrade_callback, upgrade=upgrade)
+                buy_button.callback = partial(buy_upgrade_cb, self.cog, upgrade=upgrade)
                 self.add_item(buy_button)
 
         # Back and Update buttons
-        self.add_update_button(self.cog.shop_menu_callback)
-        self.add_back_button(self.cog.main_menu_callback)
+        self.add_update_button(partial(shop_cb, self.cog))
+        self.add_back_button(partial(back_cb, self.cog))
 
         if upgrades_count > upgrades_per_page:
-            previous_button_callback = partial(self.cog.shop_menu_callback, page=page-1)
-            next_button_callback = partial(self.cog.shop_menu_callback, page=page+1)
             if page > 1:
-                self.add_previous_button(previous_button_callback)
+                self.add_previous_button(partial(shop_cb, self.cog, page=page - 1))
             if page * upgrades_per_page < upgrades_count:
-                self.add_next_button(next_button_callback)
+                self.add_next_button(partial(shop_cb, self.cog, page=page + 1))
 
 
 class ActivitiesMenuView(BaseView):
-    def __init__(self, cog, user_id, player, activities_per_page, page=1):
+    def __init__(self, cog, user_id, player, activities_per_page, page=1, *, activities_cb, back_cb, start_cb):
         super().__init__(cog, user_id)
-        self.create_activities_menu(player, activities_per_page, page)
+        self.create_activities_menu(player, activities_per_page, page, activities_cb, back_cb, start_cb)
 
-    def create_activities_menu(self, player, activities_per_page, page=1):
+    def create_activities_menu(self, player, activities_per_page, page, activities_cb, back_cb, start_cb):
         self.clear_items()
 
         activities = self.cog.get_available_activities(player)
@@ -129,7 +134,7 @@ class ActivitiesMenuView(BaseView):
                     continue
 
                 activity_button = discord.ui.Button(label=f'{activity.name}', style=button_style)
-                activity_button.callback = partial(self.cog.start_activity_callback, activity=activity)
+                activity_button.callback = partial(start_cb, self.cog, activity=activity)
                 self.add_item(activity_button)
 
         if player.current_activity:
@@ -138,28 +143,24 @@ class ActivitiesMenuView(BaseView):
             stop_button_style = discord.ButtonStyle.secondary
 
         stop_activity_button = discord.ui.Button(label=f'Stop all activites', style=stop_button_style, row=1)
-        stop_activity_button.callback = partial(self.cog.start_activity_callback, activity=None)
+        stop_activity_button.callback = partial(start_cb, self.cog, activity=None)
         self.add_item(stop_activity_button)
 
-        # Back and Update buttons
-        # self.add_update_button(self.cog.activities_menu_callback)
-        self.add_back_button(self.cog.main_menu_callback)
+        self.add_back_button(partial(back_cb, self.cog))
 
         if activities_count > activities_per_page:
-            previous_button_callback = partial(self.cog.activities_menu_callback, page=page-1)
-            next_button_callback = partial(self.cog.activities_menu_callback, page=page+1)
             if page > 1:
-                self.add_previous_button(previous_button_callback)
+                self.add_previous_button(partial(activities_cb, self.cog, page=page - 1))
             if page * activities_per_page < activities_count:
-                self.add_next_button(next_button_callback)
+                self.add_next_button(partial(activities_cb, self.cog, page=page + 1))
 
 
 class TasksMenuView(BaseView):
-    def __init__(self, cog, user_id, player, tasks_per_page, page=1):
+    def __init__(self, cog, user_id, player, tasks_per_page, page=1, *, tasks_cb, back_cb, start_cb):
         super().__init__(cog, user_id)
-        self.create_tasks_menu(player, tasks_per_page, page)
+        self.create_tasks_menu(player, tasks_per_page, page, tasks_cb, back_cb, start_cb)
 
-    def create_tasks_menu(self, player, tasks_per_page, page=1):
+    def create_tasks_menu(self, player, tasks_per_page, page, tasks_cb, back_cb, start_cb):
         self.clear_items()
 
         tasks = self.cog.get_available_tasks(player)
@@ -186,17 +187,15 @@ class TasksMenuView(BaseView):
 
                 button_style = discord.ButtonStyle.primary if can_afford else discord.ButtonStyle.secondary
                 task_button = discord.ui.Button(label=f'{task.name}', style=button_style)
-                task_button.callback = partial(self.cog.start_task_callback, task=task)
+                task_button.callback = partial(start_cb, self.cog, task=task)
                 self.add_item(task_button)
 
         # Back and Update buttons
-        self.add_update_button(self.cog.tasks_menu_callback)
-        self.add_back_button(self.cog.main_menu_callback)
+        self.add_update_button(partial(tasks_cb, self.cog))
+        self.add_back_button(partial(back_cb, self.cog))
 
         if tasks_count > tasks_per_page:
-            previous_button_callback = partial(self.cog.tasks_menu_callback, page=page-1)
-            next_button_callback = partial(self.cog.tasks_menu_callback, page=page+1)
             if page > 1:
-                self.add_previous_button(previous_button_callback)
+                self.add_previous_button(partial(tasks_cb, self.cog, page=page - 1))
             if page * tasks_per_page < tasks_count:
-                self.add_next_button(next_button_callback)
+                self.add_next_button(partial(tasks_cb, self.cog, page=page + 1))
