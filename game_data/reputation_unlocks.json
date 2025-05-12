@@ -1,0 +1,10 @@
+[
+    {
+        "id": 0,
+        "reputation_id": 0,
+        "level": 2,
+        "name": "Trustworthy",
+        "unlocks": ["fish_token", "plant_token"],
+        "description": "You are being trusted enough to actually sell product"
+    }
+]

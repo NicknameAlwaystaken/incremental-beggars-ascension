@@ -4,6 +4,73 @@ from modules.utils import format_number
 from typing import Optional, Any
 from datetime import datetime
 
+
+class Reputation:
+    def __init__(self, id, name, base_exp_requirement,
+                 scaling_factor, description, exp_formula, max_level=50,
+                 start_level=1, current_exp=0):
+        self.id = id
+        self.name = name
+        self.base_exp_requirement = base_exp_requirement
+        self.scaling_factor = scaling_factor
+        self.description = description
+        self.exp_formula = exp_formula
+        self.max_level = max_level
+        self.start_level = start_level
+        self.current_level = start_level
+        self.current_exp = current_exp
+        self.exp_passive_gain = 0
+        self.last_gained = 0
+        self.unlocks: dict[int, dict] = {}
+        self.titles: list[dict] = []
+
+    def copy(self):
+        new_reputation = Reputation(
+            id=self.id,
+            name=self.name,
+            base_exp_requirement=self.base_exp_requirement,
+            scaling_factor=self.scaling_factor,
+            description=self.description,
+            exp_formula=self.exp_formula,
+            max_level=self.max_level,
+            start_level=self.start_level,
+            current_exp=self.current_exp
+        )
+
+        new_reputation.unlocks = self.unlocks.copy()
+        new_reputation.titles = self.titles.copy()
+
+        return new_reputation
+
+    def exp_required_for_next_level(self):
+        if self.current_level >= self.max_level:
+            return 0
+
+        return self.base_exp_requirement * (self.scaling_factor ** (self.current_level - self.start_level))
+
+    def add_experience(self, experience_amount):
+        levelled_up = False
+
+        if self.current_level >= self.max_level:
+            return False
+
+        self.current_exp += experience_amount
+
+        while self.current_level < self.max_level and self.current_exp >= self.exp_required_for_next_level():
+            self.current_level += 1
+            levelled_up = True
+
+        return levelled_up
+
+    def passive_gain(self, seconds):
+        if self.exp_passive_gain > 0:
+            self.add_experience(self.exp_passive_gain * seconds)
+
+    def __str__(self):
+        last_gained_text = f' (+{format_number(self.last_gained)})' if self.last_gained > 0 else ''
+        return f'{self.name}: Level {self.current_level} - Rep: {format_number(self.current_exp)}/{format_number(self.exp_required_for_next_level())}' \
+            f'{last_gained_text}'
+
 class Energy:
     def __init__(self, id, name, max_energy, recovery_rate=0.2):
         self.id = id
@@ -258,6 +325,7 @@ class Player:
         self.title = 'Beggar'
         self.name = name
         self.display_name = display_name
+        self.reputations: dict[int, Reputation] = {}
         self.items: dict[int, Item] = {}
         self.upgrades: dict[int, Upgrade] = {}
         self.skills: dict[int, Skill] = {}
@@ -273,6 +341,9 @@ class Player:
 
     def add_skill(self, skill: Skill):
         self.skills[skill.id] = skill
+
+    def add_reputation(self, reputation: Reputation):
+        self.reputations[reputation.id] = reputation
 
     def add_game(self, game: Game):
         self.games[game.id] = game
@@ -325,6 +396,19 @@ class Player:
         for upgrade in self.upgrades.values():
             if upgrade.unlocks:
                 self.unlock_conditions.extend(upgrade.unlocks)
+
+        for reputation in self.reputations.values():
+            for unlock in reputation.unlocks.values():
+                if reputation.current_level >= unlock["level"]:
+                    self.unlock_conditions.extend(unlock["conditions"])
+
+
+    def update_title(self):
+        for reputation in self.reputations.values():
+            for title in reputation.titles:
+                if reputation.current_level < title["level"]:
+                    break;
+                self.title = title["name"]
 
     def recalculate_modifiers(self):
         self.stat_modifiers = {}
@@ -552,6 +636,8 @@ class Player:
         new_stamina_level = self.skills[0].current_level
         if stamina_level < new_stamina_level:
             self.energies[0].max_energy = new_stamina_level
+
+        self.update_title()
 
         self.time_since_last_update = (current_time - self.last_update_time).total_seconds()
         self.last_update_time = current_time

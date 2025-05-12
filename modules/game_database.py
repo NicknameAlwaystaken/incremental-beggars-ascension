@@ -32,6 +32,57 @@ async def create_player_energies_table(db_location):
         await db.commit()
 
 
+async def create_reputation_table(db_location):
+    async with aiosqlite.connect(db_location) as db:
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS reputation (
+                reputation_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                start_level INTEGER NOT NULL,
+                max_level INTEGER NOT NULL,
+                base_exp_requirement REAL NOT NULL,
+                scaling_factor REAL NOT NULL,
+                exp_formula TEXT
+        )
+        ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS reputation_titles (
+            id INTEGER PRIMARY KEY,
+            reputation_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            level INTEGER NOT NULL,
+            UNIQUE (reputation_id, level),
+            FOREIGN KEY (reputation_id) REFERENCES reputation(reputation_id) ON DELETE CASCADE
+        )
+        ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS reputation_unlocks (
+            id INTEGER PRIMARY KEY,
+            reputation_id INTEGER NOT NULL,
+            level INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            UNIQUE (reputation_id, name),
+            FOREIGN KEY (reputation_id) REFERENCES reputation(reputation_id) ON DELETE CASCADE
+        )
+        ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS reputation_unlock_effects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            unlock_id INTEGER NOT NULL,
+            effect TEXT NOT NULL,
+            UNIQUE (unlock_id, effect),
+            FOREIGN KEY (unlock_id) REFERENCES reputation_unlocks(id) ON DELETE CASCADE
+        )
+        ''')
+
+        await db.commit()
+
+
 async def create_skills_table(db_location):
     async with aiosqlite.connect(db_location) as db:
         await db.execute('''
@@ -58,6 +109,23 @@ async def create_skills_table(db_location):
             FOREIGN KEY (skill_id) REFERENCES skills (skill_id) ON DELETE CASCADE
         )
         ''')
+        await db.commit()
+
+
+async def create_player_reputation_table(database_location):
+    async with aiosqlite.connect(database_location) as db:
+        # Create a table if it doesn't exist
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS player_reputations (
+            player_id INTEGER NOT NULL,
+            reputation_id INTEGER NOT NULL,
+            current_level INTEGER NOT NULL,
+            current_exp REAL NOT NULL,
+            PRIMARY KEY (player_id, reputation_id),
+            FOREIGN KEY (reputation_id) REFERENCES reputation(reputation_id)
+        )
+        ''')
+
         await db.commit()
 
 
@@ -406,6 +474,74 @@ async def update_games_from_json_to_db(database_location):
             await db.commit()
 
 
+async def update_reputation_from_json_to_db(database_location):
+    with open(os.path.join(game_data_folder, 'reputation.json'), encoding='utf-8') as file:
+        reputation = json.load(file)
+
+    async with aiosqlite.connect(database_location) as db:
+        if reputation:
+            await db.execute('''
+                INSERT OR REPLACE INTO reputation (reputation_id, name, description, start_level, max_level, base_exp_requirement, scaling_factor, exp_formula)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (reputation['id'], reputation['name'], reputation['description'], reputation['start_level'], reputation['max_level'], reputation['base_exp_requirement'], reputation['scaling_factor'], reputation['exp_formula']))
+
+        await db.commit()
+
+
+async def update_reputation_unlocks_from_json_to_db(database_location):
+    with open(os.path.join(game_data_folder, 'reputation_unlocks.json'), encoding='utf-8') as file:
+        unlocks = json.load(file)
+
+    async with aiosqlite.connect(database_location) as db:
+        for unlock in unlocks:
+            await db.execute('''
+                INSERT OR REPLACE INTO reputation_unlocks (
+                    id, reputation_id, level, name, description
+                )
+                VALUES (?, ?, ?, ?, ?)
+            ''', (
+                unlock['id'],
+                unlock['reputation_id'],
+                unlock['level'],
+                unlock['name'],
+                unlock['description']
+            ))
+
+            # Delete old effects, replace with new
+            await db.execute('DELETE FROM reputation_unlock_effects WHERE unlock_id = ?', (unlock['id'],))
+
+            for effect in unlock.get('unlocks', []):
+                await db.execute('''
+                    INSERT INTO reputation_unlock_effects (unlock_id, effect)
+                    VALUES (?, ?)
+                ''', (
+                    unlock['id'],
+                    effect
+                ))
+
+        await db.commit()
+
+
+async def update_reputation_titles_from_json_to_db(database_location):
+    with open(os.path.join(game_data_folder, 'reputation_titles.json'), encoding='utf-8') as file:
+        titles = json.load(file)
+
+    async with aiosqlite.connect(database_location) as db:
+        for title in titles:
+            await db.execute('''
+                INSERT OR REPLACE INTO reputation_titles (
+                    id, reputation_id, name, level
+                ) VALUES (?, ?, ?, ?)
+            ''', (
+                title['id'],
+                title['reputation_id'],
+                title['name'],
+                title['level']
+            ))
+
+        await db.commit()
+
+
 async def update_skills_from_json_to_db(database_location):
     with open(os.path.join(game_data_folder, 'skills.json'), encoding='utf-8') as file:
         skills_data = json.load(file)
@@ -665,6 +801,15 @@ async def update_player_energies(db, player_id, player_energies):
             INSERT OR REPLACE INTO player_energies (player_id, energy_id, current_energy)
             VALUES (?, ?, ?)
         ''', (player_id, energy_id, current_energy))
+
+
+async def update_player_reputation(db, player_id, player_reputations):
+    # Add or update the player's reputations
+    for reputation_id, current_level, current_exp in player_reputations:
+        await db.execute('''
+            INSERT OR REPLACE INTO player_reputations (player_id, reputation_id, current_level, current_exp)
+            VALUES (?, ?, ?, ?)
+        ''', (player_id, reputation_id, current_level, current_exp))
 
 
 async def update_player_skills(db, player_id, player_skills):

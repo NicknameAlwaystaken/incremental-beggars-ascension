@@ -85,7 +85,7 @@ class ShopMenuView(BaseView):
         missing_upgrades = self.cog.get_missing_upgrades(player)
         upgrades_count = 0
         for upgrade, _ in missing_upgrades:
-            if not self.cog.check_conditions(player, upgrade.unlock_conditions):
+            if not self.cog.satisfies_unlock_conditions(player, upgrade.unlock_conditions):
                 continue
             upgrades_count += 1
             start_index = (page - 1) * upgrades_per_page

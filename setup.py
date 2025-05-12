@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os
 from discord.ext import commands
-from modules.game_database import create_activities_table, create_energies_table, create_games_table, create_items_table, create_player_activities_table, create_player_chips_table, create_player_energies_table, create_player_games_table, create_player_items_table, create_player_skills_table, create_player_tasks_table, create_player_upgrades_table, create_players_table, create_server_channel_table, create_skills_table, create_tasks_table, create_upgrades_table, update_activities_from_json_to_db, update_energies_from_json_to_db, update_games_from_json_to_db, update_items_from_json_to_db, update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_skills, update_player_upgrades, update_skills_from_json_to_db, update_tasks_from_json_to_db, update_upgrades_from_json_to_db
+from modules.game_database import create_activities_table, create_energies_table, create_games_table, create_items_table, create_player_activities_table, create_player_chips_table, create_player_energies_table, create_player_games_table, create_player_items_table, create_player_reputation_table, create_player_skills_table, create_player_tasks_table, create_player_upgrades_table, create_players_table, create_reputation_table, create_server_channel_table, create_skills_table, create_tasks_table, create_upgrades_table, update_activities_from_json_to_db, update_energies_from_json_to_db, update_games_from_json_to_db, update_items_from_json_to_db, update_reputation_from_json_to_db, update_reputation_titles_from_json_to_db, update_reputation_unlocks_from_json_to_db, update_skills_from_json_to_db, update_tasks_from_json_to_db, update_upgrades_from_json_to_db
 from modules.bot_commands import IncrementalGameCog, make_tree_sync_command
 
 game_data_folder = 'game_data'
@@ -42,6 +42,12 @@ async def create_tables():
     await update_tasks_from_json_to_db(GAME_DB_LOCATION)
     await create_player_tasks_table(GAME_DB_LOCATION)
 
+    await create_reputation_table(GAME_DB_LOCATION)
+    await update_reputation_from_json_to_db(GAME_DB_LOCATION)
+    await update_reputation_unlocks_from_json_to_db(GAME_DB_LOCATION)
+    await update_reputation_titles_from_json_to_db(GAME_DB_LOCATION)
+    await create_player_reputation_table(GAME_DB_LOCATION)
+
     await create_games_table(GAME_DB_LOCATION)
     await update_games_from_json_to_db(GAME_DB_LOCATION)
     await create_player_games_table(GAME_DB_LOCATION)
@@ -53,6 +59,7 @@ async def prepare_game_cog(game_cog: IncrementalGameCog):
     await game_cog.get_server_channels_from_db()
 
     await game_cog.get_items_from_db()
+    await game_cog.get_reputation_from_db()
     await game_cog.get_upgrades_from_db()
     await game_cog.get_tasks_from_db()
     await game_cog.get_skills_from_db()

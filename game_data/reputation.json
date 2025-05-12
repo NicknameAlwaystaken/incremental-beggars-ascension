@@ -1,0 +1,10 @@
+{
+    "id": 0,
+    "name": "Reputation",
+    "description": "Your reputation, it unlocks special opportunities.",
+    "start_level": 1,
+    "max_level": 50,
+    "base_exp_requirement": 50,
+    "scaling_factor": 1.5,
+    "exp_formula": "base_exp * (scaling_factor ^ (current_level - 1))"
+}

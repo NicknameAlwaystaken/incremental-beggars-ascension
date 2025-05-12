@@ -16,7 +16,7 @@
             }
         ],
         "energy_costs": [],
-        "unlock_conditions": ["farming"],
+        "unlock_conditions": ["farming", "sell_plants"],
         "unlocks": [],
         "description": "Sell plants for money. Who would actually buy them?",
         "task_amount": -1,
@@ -40,7 +40,7 @@
             }
         ],
         "energy_costs": [],
-        "unlock_conditions": ["fishing"],
+        "unlock_conditions": ["fishing", "sell_fish"],
         "unlocks": [],
         "description": "Sell fish for money. Good riddance!",
         "task_amount": -1,
@@ -54,7 +54,11 @@
         "outputs": [
             {
                 "item": "coins",
-                "amount":1
+                "amount": 1
+            },
+            {
+                "item": "reputation",
+                "amount": 10
             }
         ],
         "costs": [],

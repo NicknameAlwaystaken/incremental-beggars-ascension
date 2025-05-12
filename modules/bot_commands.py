@@ -1,11 +1,12 @@
 from __future__ import annotations
+from typing import Optional
 from discord.app_commands import CommandTree
 from discord.ext import commands
 from datetime import datetime
-from modules.game_database import update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_skills, update_player_upgrades
+from modules.game_database import update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_reputation, update_player_skills, update_player_upgrades
 from modules.game_features import Game, GameSession, RPSGameSession, Task
 from modules.menu_callbacks import activities_menu_callback, buy_chips_callback, main_menu_callback, redeem_chips_callback, register_callback, select_players_callback, shop_menu_callback, tasks_menu_callback
-from modules.player_classes import Activity, Energy, Item, Player, Skill, Upgrade
+from modules.player_classes import Activity, Energy, Item, Player, Reputation, Skill, Upgrade
 from modules.utils import format_number, format_time
 from views.views import MainMenuView
 from views.dropdownviews import GamesDropdownView
@@ -40,6 +41,7 @@ class IncrementalGameCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot: commands.Bot = bot
         self.players: dict[int, Player] = {}
+        self.reputations: dict[int, Reputation] = {}
         self.upgrades: dict[int, Upgrade] = {}
         self.activities: dict[int, Activity] = {}
         self.skills: dict[int, Skill] = {}
@@ -115,12 +117,12 @@ class IncrementalGameCog(commands.Cog):
             formatted_coins = f"`🪙 {coins_text + (spacing_character * (padding_amount - len(coins_text)))} {coins_bar}`"
 
             played, wins, losses, amount_bet, earnings = reduce(lambda acc, game: (
-                    acc[0] + game.played,
-                    acc[1] + game.wins,
-                    acc[2] + game.losses,
-                    acc[3] + game.amount_bet,
-                    acc[4] + game.earnings
-                ), player.games.values(), (0, 0, 0, 0, 0))
+                acc[0] + game.played,
+                acc[1] + game.wins,
+                acc[2] + game.losses,
+                acc[3] + game.amount_bet,
+                acc[4] + game.earnings
+            ), player.games.values(), (0, 0, 0, 0, 0))
 
             player_stats_text = f'\n\n**Totals**\nPlayed: `{format_number(played)}` Wins: `{format_number(wins)}` Losses: `{format_number(losses)}` Betted: `{format_number(amount_bet)}` Earnings: `{format_number(earnings)}`'
 
@@ -344,6 +346,19 @@ class IncrementalGameCog(commands.Cog):
                         energy[0], energy[1],
                         energy[2], energy[3])
 
+    async def get_reputation_unlocks_from_db(self):
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT unlock_id, name, description
+            FROM reputation_unlocks''') as cursor:
+
+                reputation_unlocks = await cursor.fetchall()
+
+                self.reputation_unlocks = {}
+                for unlock in reputation_unlocks:
+                    self.reputation_unlocks[unlock[0]] = ReputationUnlock(
+                        unlock[0], unlock[1], unlock[2])
+
     async def get_items_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             async with db.execute('''
@@ -372,6 +387,64 @@ class IncrementalGameCog(commands.Cog):
                         game[0], game[1]
                     )
 
+    async def get_reputation_from_db(self):
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+                SELECT reputation_id, name, description, start_level, max_level, base_exp_requirement, scaling_factor, exp_formula
+                FROM reputation
+                LIMIT 1
+            ''') as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    reputation_id = row[0]
+                    self.reputations[reputation_id] = Reputation(
+                        id=row[0],
+                        name=row[1],
+                        description=row[2],
+                        start_level=row[3],
+                        max_level=row[4],
+                        base_exp_requirement=row[5],
+                        scaling_factor=row[6],
+                        exp_formula=row[7]
+                    )
+
+            # Fill unlocks for each reputation
+            for rep_id, reputation in self.reputations.items():
+                # reputation titles
+                async with db.execute('''
+                    SELECT id, name, level
+                    FROM reputation_titles
+                    WHERE reputation_id = ?
+                    ORDER BY level ASC
+                ''', (rep_id,)) as cursor:
+                    titles = await cursor.fetchall()
+
+                reputation.titles = [{"id": t[0], "name": t[1], "level": t[2]} for t in titles]
+
+                # reputation unlocks
+                async with db.execute('''
+                    SELECT id, level
+                    FROM reputation_unlocks
+                    WHERE reputation_id = ?
+                ''', (rep_id,)) as cursor:
+                    unlocks = await cursor.fetchall()
+
+                for unlock_id, level in unlocks:
+                    reputation.unlocks[unlock_id] = {
+                        "level": level,
+                        "conditions": []
+                    }
+
+                async with db.execute('''
+                    SELECT unlock_id, effect
+                    FROM reputation_unlock_effects
+                ''') as cursor:
+                    effects = await cursor.fetchall()
+
+                for unlock_id, effect in effects:
+                    if unlock_id in reputation.unlocks:
+                        reputation.unlocks[unlock_id]["conditions"].append(effect)
+
     async def get_skills_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             async with db.execute('''
@@ -383,15 +456,15 @@ class IncrementalGameCog(commands.Cog):
                 self.skills = {}
                 for skill in skills:
                     self.skills[skill[0]] = Skill(
-                            id=skill[0],
-                            name=skill[1],
-                            description=skill[2],
-                            start_level=skill[3],
-                            max_level=skill[4],
-                            base_exp_requirement=skill[5],
-                            scaling_factor=skill[6],
-                            exp_formula=skill[7]
-                        )
+                        id=skill[0],
+                        name=skill[1],
+                        description=skill[2],
+                        start_level=skill[3],
+                        max_level=skill[4],
+                        base_exp_requirement=skill[5],
+                        scaling_factor=skill[6],
+                        exp_formula=skill[7]
+                    )
 
             # Fetch the effects from the skill_effects table
             async with db.execute('''
@@ -431,19 +504,19 @@ class IncrementalGameCog(commands.Cog):
                         unlock_conditions = unlock_conditions.split(',')
 
                     self.activities[activity[0]] = Activity(
-                            id=activity[0],
-                            name=activity[1],
-                            icon=activity[2],
-                            output_item=item,
-                            output_amount=activity[4],
-                            energy_type=activity[5],
-                            energy_drain_rate=activity[6],
-                            skill=skill,
-                            skill_exp_rate=activity[8],
-                            unlock_conditions=unlock_conditions,
-                            description=activity[10],
-                            status_description=activity[11]
-                        )
+                        id=activity[0],
+                        name=activity[1],
+                        icon=activity[2],
+                        output_item=item,
+                        output_amount=activity[4],
+                        energy_type=activity[5],
+                        energy_drain_rate=activity[6],
+                        skill=skill,
+                        skill_exp_rate=activity[8],
+                        unlock_conditions=unlock_conditions,
+                        description=activity[10],
+                        status_description=activity[11]
+                    )
 
     async def get_tasks_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -690,6 +763,24 @@ class IncrementalGameCog(commands.Cog):
                     new_game.earnings = earnings
                     player.games[game_id] = new_game
 
+    async def get_player_reputations_from_db(self, player_id):
+        await self.get_reputation_from_db()
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT player_id, reputation_id, current_level, current_exp
+            FROM player_reputations
+            WHERE player_id = ?''', (player_id,)) as cursor:
+
+                player_reputations = await cursor.fetchall()
+
+                for player_reputation in player_reputations:
+                    player_id, reputation_id, _, current_exp = player_reputation
+                    player = self.players[int(player_id)]
+                    if self.reputations:
+                        reputation = self.reputations[reputation_id].copy()
+                        player.add_reputation(reputation)
+                        reputation.add_experience(current_exp)
+
     async def get_player_skills_from_db(self, player_id):
         await self.get_skills_from_db()
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -740,6 +831,7 @@ class IncrementalGameCog(commands.Cog):
                     player.start_date = datetime.fromisoformat(start_date)
                     self.players[int(player_id)] = player
 
+                    await self.get_player_reputations_from_db(player_id)
                     await self.get_player_upgrades_from_db(player_id)
                     await self.get_player_items_from_db(player_id)
                     await self.get_player_skills_from_db(player_id)
@@ -831,6 +923,10 @@ class IncrementalGameCog(commands.Cog):
             if get_item:
                 if get_item.amount < get_item.capacity:
                     get_item.increase_amount(output["amount"])
+            else:
+                get_item = next((item for item in player.reputations.values() if item.name.lower() == output["item"].lower()), None)
+                if get_item:
+                    get_item.add_experience(output["amount"])
 
         for key, item, cost in cost_list:
             if key == "energy":
@@ -851,12 +947,14 @@ class IncrementalGameCog(commands.Cog):
             player_skills = [(id, skill.current_level, skill.current_exp) for id, skill in player.skills.items()]
             player_energies = [(id, energy.current_energy) for id, energy in player.energies.items()]
             player_games = [(id, game.played, game.wins, game.losses, game.amount_bet, game.earnings) for id, game in player.games.items()]
+            player_reputations = [(id, reputation.current_level, reputation.current_exp) for id, reputation in player.reputations.items()]
 
             await db.execute('BEGIN')
 
             await update_player_upgrades(db, player_id, player_upgrades)
             await update_player_items(db, player_id, player_items)
             await update_player_skills(db, player_id, player_skills)
+            await update_player_reputation(db, player_id, player_reputations)
             await update_player_activities(db, player_id, player_activity)
             await update_player_energies(db, player_id, player_energies)
             await update_player_chips(db, player_id, player_chips)
@@ -869,9 +967,12 @@ class IncrementalGameCog(commands.Cog):
         new_player = Player(user.id, user.name, user.display_name)
         new_player.add_item(self.items[0].copy())
         new_player.add_skill(self.skills[0].copy())
+        new_player.add_reputation(self.reputations[0].copy())
         new_player.add_energy(self.energies[0].copy())
         new_player.add_upgrade(self.upgrades[0].copy())
         new_player.games = self.get_games()
+
+        new_player.update_title()
 
         self.players[user.id] = new_player
 
@@ -880,9 +981,10 @@ class IncrementalGameCog(commands.Cog):
 
     def player_stats_embed_message(self, player):
         embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
+        reputation_text = str(next((item for item in player.reputations.values() if item.name.lower() == "reputation"), ""))
         embed = discord.Embed(
             title="🎩 Player Status",
-            description=f"**{player.title}**: __{player.display_name}__\nPlaytime: {format_time((datetime.now() - player.start_date).total_seconds())}\nTime passed: {format_time(player.time_since_last_update)}",
+            description=f"**{player.title}**: __{player.display_name}__\n{reputation_text}\nPlaytime: {format_time((datetime.now() - player.start_date).total_seconds())}\nTime passed: {format_time(player.time_since_last_update)}",
             color=embed_color
         )
 
@@ -946,8 +1048,9 @@ class IncrementalGameCog(commands.Cog):
         upgrades_count = 0
         if missing_upgrades:
             for upgrade, upgrades_left in missing_upgrades:
-                if not self.check_conditions(player, upgrade.unlock_conditions):
+                if not self.satisfies_unlock_conditions(player, upgrade.unlock_conditions):
                     continue
+
                 upgrades_count += 1
 
                 start_index = (page - 1) * UPGRADES_PER_PAGE
@@ -1109,7 +1212,7 @@ class IncrementalGameCog(commands.Cog):
 
         embed = discord.Embed(
             title=f"📋 Available Tasks - Page {page}/{pages}",
-            description="Select a task, unlike activities this is instant.",
+            description="Complete a task, unlike activities this is instant.",
             color=embed_color
         )
 
@@ -1227,7 +1330,7 @@ class IncrementalGameCog(commands.Cog):
 
         return tasks_list
 
-    def check_conditions(self, player: Player, conditions: list) -> bool:
+    def satisfies_unlock_conditions(self, player: Player, conditions: list) -> bool:
         for condition in conditions:
             if condition.startswith('level.'):
                 _, skill_name, required_level = condition.split('.')
@@ -1242,7 +1345,9 @@ class IncrementalGameCog(commands.Cog):
             elif condition.startswith('gold.'):
                 pass
 
-        return True
+        if all(condition in player.unlock_conditions for condition in conditions):
+            return True
+        return False
 
     async def save_channels_to_db(self):
         async with aiosqlite.connect(SERVER_DB_LOCATION) as db:

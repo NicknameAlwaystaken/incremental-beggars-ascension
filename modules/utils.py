@@ -46,6 +46,6 @@ def format_number(number: float, sig_figs=3):
     prefix = prefixes.get(exponent, f"e{exponent}")
 
     if prefix:
-        return f"{value_str}{prefix}"
+        return f"{value_str}**{prefix}**"
     else:
         return value_str

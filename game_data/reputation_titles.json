@@ -1,0 +1,20 @@
+[
+    {
+        "id": 0,
+        "reputation_id": 0,
+        "name": "Beggar",
+        "level": 0
+    },
+    {
+        "id": 1,
+        "reputation_id": 0,
+        "name": "Commoner",
+        "level": 2
+    },
+    {
+        "id": 2,
+        "reputation_id": 0,
+        "name": "Gentleman",
+        "level": 3
+    }
+]

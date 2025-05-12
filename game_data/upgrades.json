@@ -294,5 +294,29 @@
         "description": "One handle broken. This will be tough.",
         "effects": {
         }
+    },
+    {
+        "id": "19",
+        "name": "Fishmonger's Token",
+        "cost_material": "coins",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlock_conditions": ["fish_token"],
+        "unlocks": ["sell_fish"],
+        "description": "You are allowed to sell fish locally now!",
+        "effects": {
+        }
+    },
+    {
+        "id": "20",
+        "name": "Herbalist's Fetcher",
+        "cost_material": "coins",
+        "cost": 20,
+        "max_purchases": 1,
+        "unlock_conditions": ["plant_token"],
+        "unlocks": ["sell_plants"],
+        "description": "Local herbalist is willing to buy plants from you.",
+        "effects": {
+        }
     }
 ]
