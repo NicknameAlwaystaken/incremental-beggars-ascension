@@ -3,10 +3,10 @@ from typing import Optional
 from discord.app_commands import CommandTree
 from discord.ext import commands
 from datetime import datetime
-from modules.game_database import update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_reputation, update_player_skills, update_player_upgrades
+from modules.game_database import update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_locations, update_player_reputation, update_player_skills, update_player_upgrades
 from modules.game_features import Game, GameSession, RPSGameSession, Task
 from modules.menu_callbacks import activities_menu_callback, buy_chips_callback, main_menu_callback, redeem_chips_callback, register_callback, select_players_callback, shop_menu_callback, tasks_menu_callback
-from modules.player_classes import Activity, Energy, Item, Player, Reputation, Skill, Upgrade
+from modules.player_classes import Activity, Energy, Item, Location, Player, Reputation, Skill, Upgrade
 from modules.utils import format_number, format_time
 from views.views import MainMenuView
 from views.dropdownviews import GamesDropdownView
@@ -28,13 +28,13 @@ MAX_MESSAGE_LENGTH = 2000
 
 GAME_NAME = "Beggar's Ascension"
 
-ACTIVITIES_PER_PAGE = 5
+ACTIVITIES_PER_PAGE = 4
 
 TASKS_PER_PAGE = 5
 
 UPGRADES_PER_PAGE = 4
 
-PRESHOW_BASIC_UNLOCKS = ["thieving", "fishing", "manual labour", "farming", "mining"]
+PRESHOW_BASIC_UNLOCKS = ["manual labour"]
 
 
 class IncrementalGameCog(commands.Cog):
@@ -45,6 +45,7 @@ class IncrementalGameCog(commands.Cog):
         self.upgrades: dict[int, Upgrade] = {}
         self.activities: dict[int, Activity] = {}
         self.skills: dict[int, Skill] = {}
+        self.locations: dict[int, Location] = {}
         self.energies: dict[int, Energy] = {}
         self.items: dict[int, Item] = {}
         self.tasks: dict[int, Task] = {}
@@ -72,6 +73,9 @@ class IncrementalGameCog(commands.Cog):
     def get_activities(self):
         return {id: activity.copy() for id, activity in self.activities.items()}
 
+    def get_locations(self):
+        return {id: location.copy() for id, location in self.locations.items()}
+
     def get_tasks(self):
         return {id: task.copy() for id, task in self.tasks.items()}
 
@@ -83,6 +87,15 @@ class IncrementalGameCog(commands.Cog):
 
     def get_items(self):
         return {id: item.copy() for id, item in self.items.items()}
+
+    def get_location_tasks(self, location: Location):
+        return {id: task.copy() for id, task in self.tasks.items() if id in location.tasks}
+
+    def get_location_activities(self, location: Location):
+        return {id: activity.copy() for id, activity in self.activities.items() if id in location.activities}
+
+    def get_location_upgrades(self, location: Location):
+        return {id: upgrade.copy() for id, upgrade in self.upgrades.items() if id in location.upgrades}
 
     async def is_allowed_channel(self, ctx):
         if ctx.guild is None:
@@ -445,6 +458,47 @@ class IncrementalGameCog(commands.Cog):
                     if unlock_id in reputation.unlocks:
                         reputation.unlocks[unlock_id]["conditions"].append(effect)
 
+    async def get_locations_from_db(self):
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            # 1. Load all locations
+            async with db.execute('SELECT location_id, name, icon_png FROM locations') as cursor:
+                locations = await cursor.fetchall()
+
+                self.locations = {}
+                for loc in locations:
+                    location_id, name, icon_png = loc
+                    self.locations[location_id] = Location(id=location_id, name=name, icon_png=icon_png)
+
+            # Helper: name → id maps
+            async def make_lookup(table: str):
+                async with db.execute(f"SELECT id, name FROM {table}") as cursor:
+                    return {name: id for id, name in await cursor.fetchall()}
+
+            activity_dict = self.get_activities()
+            task_dict = self.get_tasks()
+            upgrade_dict = self.get_upgrades()
+
+            # 2. Link activities
+            async with db.execute('SELECT location_id, activity FROM location_activities') as cursor:
+                for loc_id, activity_name in await cursor.fetchall():
+                    activity_id = next((activity.id for activity in activity_dict.values() if activity_name == activity.name), None)
+                    if activity_id is not None:
+                        self.locations[loc_id].activities.append(activity_id)
+
+            # 3. Link tasks
+            async with db.execute('SELECT location_id, task FROM location_tasks') as cursor:
+                for loc_id, task_name in await cursor.fetchall():
+                    task_id = next((task.id for task in task_dict.values() if task_name == task.name), None)
+                    if task_id is not None:
+                        self.locations[loc_id].tasks.append(task_id)
+
+            # 4. Link upgrades
+            async with db.execute('SELECT location_id, upgrade FROM location_upgrades') as cursor:
+                for loc_id, upgrade_name in await cursor.fetchall():
+                    upgrade_id = next((upgrade.id for upgrade in upgrade_dict.values() if upgrade_name == upgrade.name), None)
+                    if upgrade_id is not None:
+                        self.locations[loc_id].upgrades.append(upgrade_id)
+
     async def get_skills_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             async with db.execute('''
@@ -680,6 +734,21 @@ class IncrementalGameCog(commands.Cog):
                     if upgrade_id in self.upgrades:
                         self.upgrades[upgrade_id].unlocks.append(condition_text)
 
+    async def get_player_locations_from_db(self, player_id):
+        await self.get_locations_from_db()
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT player_id, location_id
+            FROM player_locations
+            WHERE player_id = ?''', (player_id,)) as cursor:
+
+                player_locations = await cursor.fetchall()
+
+                for player_location in player_locations:
+                    player_id, location_id = player_location
+                    player = self.players[int(player_id)]
+                    player.current_location = self.locations[location_id].copy()
+
     async def get_player_activities_from_db(self, player_id):
         await self.get_activities_from_db()
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -827,6 +896,8 @@ class IncrementalGameCog(commands.Cog):
                 if found_player:
                     player_id, name, display_name, start_date, last_update_time = found_player
                     player = Player(player_id, name, display_name)
+                    # initialize with default location
+                    player.set_location(self.locations[0])
                     player.last_update_time = datetime.fromisoformat(last_update_time)
                     player.start_date = datetime.fromisoformat(start_date)
                     self.players[int(player_id)] = player
@@ -837,6 +908,7 @@ class IncrementalGameCog(commands.Cog):
                     await self.get_player_skills_from_db(player_id)
                     await self.get_player_energies_from_db(player_id)
                     await self.get_player_activities_from_db(player_id)
+                    await self.get_player_locations_from_db(player_id)
                     await self.get_player_chips_from_db(player_id)
                     await self.get_player_games_from_db(player_id)
 
@@ -944,6 +1016,7 @@ class IncrementalGameCog(commands.Cog):
             player_items = [(id, item.amount) for id, item in player.items.items()]
             player_chips = player.chips
             player_activity = player.current_activity
+            player_location = player.current_location
             player_skills = [(id, skill.current_level, skill.current_exp) for id, skill in player.skills.items()]
             player_energies = [(id, energy.current_energy) for id, energy in player.energies.items()]
             player_games = [(id, game.played, game.wins, game.losses, game.amount_bet, game.earnings) for id, game in player.games.items()]
@@ -954,6 +1027,7 @@ class IncrementalGameCog(commands.Cog):
             await update_player_upgrades(db, player_id, player_upgrades)
             await update_player_items(db, player_id, player_items)
             await update_player_skills(db, player_id, player_skills)
+            await update_player_locations(db, player_id, player_location)
             await update_player_reputation(db, player_id, player_reputations)
             await update_player_activities(db, player_id, player_activity)
             await update_player_energies(db, player_id, player_energies)
@@ -973,6 +1047,7 @@ class IncrementalGameCog(commands.Cog):
         new_player.games = self.get_games()
 
         new_player.update_title()
+        new_player.set_location(self.locations[0])
 
         self.players[user.id] = new_player
 
@@ -987,6 +1062,16 @@ class IncrementalGameCog(commands.Cog):
             description=f"**{player.title}**: __{player.display_name}__\n{reputation_text}\nPlaytime: {format_time((datetime.now() - player.start_date).total_seconds())}\nTime passed: {format_time(player.time_since_last_update)}",
             color=embed_color
         )
+
+        if player.current_activity:
+            activity_name = player.current_activity.name.lower()
+            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{activity_name}.png")
+
+        if player.current_location:
+            location_png = player.current_location.icon_png
+            location_name = player.current_location.name
+
+            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
 
         spacing_character = " "
         padding_amount = 25
@@ -1038,7 +1123,7 @@ class IncrementalGameCog(commands.Cog):
         for item in player.items.values():
             formatted_items.append(f"{item.name.capitalize()}: {format_number(item.amount)}/{format_number(item.capacity)} (+{format_number(item.last_gained)})")
 
-        missing_upgrades = self.get_missing_upgrades(player)
+        missing_upgrades = self.get_missing_upgrades_filtered_by_location(player)
 
         missing_upgrades_text = []
 
@@ -1077,6 +1162,16 @@ class IncrementalGameCog(commands.Cog):
             description=f"**{player.title}**: __{player.display_name}__",
             color=embed_color
         )
+
+        if player.current_activity:
+            activity_name = player.current_activity.name.lower()
+            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{activity_name}.png")
+
+        if player.current_location:
+            location_png = player.current_location.icon_png
+            location_name = player.current_location.name
+
+            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
 
         spacing_character = " "
         padding_amount = 25
@@ -1163,6 +1258,16 @@ class IncrementalGameCog(commands.Cog):
             color=embed_color
         )
 
+        if player.current_activity:
+            activity_name = player.current_activity.name.lower()
+            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{activity_name}.png")
+
+        if player.current_location:
+            location_png = player.current_location.icon_png
+            location_name = player.current_location.name
+
+            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
+
         embed.add_field(name='', value='\n\n'.join(activity_details), inline=False)
         return embed
 
@@ -1215,6 +1320,16 @@ class IncrementalGameCog(commands.Cog):
             description="Complete a task, unlike activities this is instant.",
             color=embed_color
         )
+
+        if player.current_activity:
+            activity_name = player.current_activity.name.lower()
+            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{activity_name}.png")
+
+        if player.current_location:
+            location_png = player.current_location.icon_png
+            location_name = player.current_location.name
+
+            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
 
         spacing_character = " "
         padding_amount = 25
@@ -1286,6 +1401,12 @@ class IncrementalGameCog(commands.Cog):
             return f"• Requires {skill.capitalize()} Level {level}"
         return f"• Requires {condition}"
 
+    def get_missing_upgrades_filtered_by_location(self, player: Player) -> list[tuple[Upgrade, int]]:
+        missing_upgrades: list[tuple[Upgrade, int]] = self.get_missing_upgrades(player)
+        if player.current_location:
+            return [upgrade for upgrade in missing_upgrades if upgrade[0].id in player.current_location.upgrades]
+        return missing_upgrades
+
     def get_missing_upgrades(self, player) -> list[tuple[Upgrade, int]]:
         missing_upgrades = []
         upgrades_list = self.get_upgrades()
@@ -1300,9 +1421,12 @@ class IncrementalGameCog(commands.Cog):
 
         return missing_upgrades
 
-    def get_available_activities(self, player) -> list[tuple[str, Activity]]:
+    def get_available_activities(self, player: Player) -> list[tuple[str, Activity]]:
         activities_list = []
         for activity in self.activities.values():
+            if player.current_location:
+                if activity.id not in player.current_location.activities:
+                    continue;
             button_type = "enabled"
             if activity.unlock_conditions:
                 list_of_preshown_conditions = PRESHOW_BASIC_UNLOCKS
@@ -1320,6 +1444,10 @@ class IncrementalGameCog(commands.Cog):
     def get_available_tasks(self, player) -> list[Task]:
         tasks_list = []
         for task in self.tasks.values():
+            if player.current_location:
+                if task.id not in player.current_location.tasks:
+                    continue;
+
             if task.unlock_conditions:
                 list_of_preshown_conditions = PRESHOW_BASIC_UNLOCKS
                 if not all(condition in list_of_preshown_conditions for condition in task.unlock_conditions):
@@ -1339,6 +1467,7 @@ class IncrementalGameCog(commands.Cog):
 
                 if not skill or skill.current_level < int(required_level):
                     return False
+                return True
 
             elif condition.startswith('energy.'):
                 pass

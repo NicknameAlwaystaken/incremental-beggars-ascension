@@ -5,6 +5,29 @@ from typing import Optional, Any
 from datetime import datetime
 
 
+class Location:
+    def __init__(self, id, name, icon_png):
+        self.id = id
+        self.name = name
+        self.icon_png = icon_png
+        self.activities: list[int] = []
+        self.tasks: list[int] = []
+        self.upgrades: list[int] = []
+
+    def copy(self):
+        new_location = Location(
+            id=self.id,
+            name=self.name,
+            icon_png=self.icon_png
+        )
+
+        new_location.activities = self.activities.copy()
+        new_location.tasks = self.tasks.copy()
+        new_location.upgrades = self.upgrades.copy()
+
+        return new_location
+
+
 class Reputation:
     def __init__(self, id, name, base_exp_requirement,
                  scaling_factor, description, exp_formula, max_level=50,
@@ -336,6 +359,7 @@ class Player:
         self.unlock_conditions = []
         self.last_update_time = datetime.now()
         self.current_activity: Optional[Activity] = None
+        self.current_location: Optional[Location] = None
         self.time_since_last_update = 0
         self.start_date = datetime.now()
 
@@ -347,6 +371,9 @@ class Player:
 
     def add_game(self, game: Game):
         self.games[game.id] = game
+
+    def set_location(self, location: Location):
+        self.current_location = location
 
     def buy_upgrade(self, upgrade:  Upgrade, count=1):
         new_upgrade = upgrade.copy()

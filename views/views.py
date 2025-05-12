@@ -1,13 +1,16 @@
 from __future__ import annotations
 import discord
 from functools import partial
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from modules.bot_commands import IncrementalGameCog  # Only imported during type checking
 
 class BaseView(discord.ui.View):
     def __init__(self, cog, user_id):
         super().__init__(timeout=None)
-        self.cog = cog
-        self.user_id = user_id
+        self.cog: IncrementalGameCog = cog
+        self.user_id: int = user_id
 
     def is_owner(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
@@ -82,7 +85,7 @@ class ShopMenuView(BaseView):
 
     def create_shop_menu(self, player, upgrades_per_page, page, shop_cb, back_cb, buy_upgrade_cb):
         self.clear_items()
-        missing_upgrades = self.cog.get_missing_upgrades(player)
+        missing_upgrades = self.cog.get_missing_upgrades_filtered_by_location(player)
         upgrades_count = 0
         for upgrade, _ in missing_upgrades:
             if not self.cog.satisfies_unlock_conditions(player, upgrade.unlock_conditions):

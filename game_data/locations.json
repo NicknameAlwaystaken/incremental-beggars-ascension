@@ -1,0 +1,28 @@
+[
+    {
+        "id": 0,
+        "name": "Home Village",
+        "icon_png": "home_village",
+        "activities": [
+            "Beg",
+            "Clean Stables",
+            "Fishing",
+            "Plant Caring"
+        ],
+        "tasks": [
+            "Help Bystanders",
+            "Sell x3 Plants",
+            "Sell x3 Fish"
+        ],
+        "upgrades": [
+            "Pouch",
+            "Shape up!",
+            "Stick with a string",
+            "Pot for plants",
+            "Familiar pockets",
+            "Herbalist's Fetcher",
+            "Fishmonger's Token"
+        ],
+        "description": "Village you were born and raised in, you wish to be nice to the villagers."
+    }
+]

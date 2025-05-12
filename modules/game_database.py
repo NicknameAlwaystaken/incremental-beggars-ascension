@@ -32,10 +32,10 @@ async def create_player_energies_table(db_location):
         await db.commit()
 
 
-async def create_reputation_table(db_location):
+async def create_reputations_table(db_location):
     async with aiosqlite.connect(db_location) as db:
         await db.execute('''
-            CREATE TABLE IF NOT EXISTS reputation (
+            CREATE TABLE IF NOT EXISTS reputations (
                 reputation_id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 description TEXT,
@@ -54,7 +54,7 @@ async def create_reputation_table(db_location):
             name TEXT NOT NULL,
             level INTEGER NOT NULL,
             UNIQUE (reputation_id, level),
-            FOREIGN KEY (reputation_id) REFERENCES reputation(reputation_id) ON DELETE CASCADE
+            FOREIGN KEY (reputation_id) REFERENCES reputations(reputation_id) ON DELETE CASCADE
         )
         ''')
 
@@ -66,7 +66,7 @@ async def create_reputation_table(db_location):
             name TEXT NOT NULL,
             description TEXT,
             UNIQUE (reputation_id, name),
-            FOREIGN KEY (reputation_id) REFERENCES reputation(reputation_id) ON DELETE CASCADE
+            FOREIGN KEY (reputation_id) REFERENCES reputations(reputation_id) ON DELETE CASCADE
         )
         ''')
 
@@ -112,7 +112,22 @@ async def create_skills_table(db_location):
         await db.commit()
 
 
-async def create_player_reputation_table(database_location):
+async def create_player_locations_table(database_location):
+    async with aiosqlite.connect(database_location) as db:
+        # Create a table if it doesn't exist
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS player_locations (
+            player_id INTEGER NOT NULL,
+            location_id INTEGER NOT NULL,
+            PRIMARY KEY (player_id, location_id),
+            FOREIGN KEY (location_id) REFERENCES locations(location_id)
+        )
+        ''')
+
+        await db.commit()
+
+
+async def create_player_reputations_table(database_location):
     async with aiosqlite.connect(database_location) as db:
         # Create a table if it doesn't exist
         await db.execute('''
@@ -122,7 +137,7 @@ async def create_player_reputation_table(database_location):
             current_level INTEGER NOT NULL,
             current_exp REAL NOT NULL,
             PRIMARY KEY (player_id, reputation_id),
-            FOREIGN KEY (reputation_id) REFERENCES reputation(reputation_id)
+            FOREIGN KEY (reputation_id) REFERENCES reputations(reputation_id)
         )
         ''')
 
@@ -156,6 +171,52 @@ async def create_player_activities_table(database_location):
             FOREIGN KEY (activity_id) REFERENCES activities(activity_id)
         )
         ''')
+
+        await db.commit()
+
+
+async def create_locations_table(database_location):
+    async with aiosqlite.connect(database_location) as db:
+        # Create a table if it doesn't exist
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS locations (
+            location_id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            icon_png TEXT NOT NULL,
+            description TEXT NOT NULL
+        );
+        ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS location_activities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            location_id INTEGER NOT NULL,
+            activity TEXT NOT NULL,
+            UNIQUE (location_id, activity),
+            FOREIGN KEY (location_id) REFERENCES locations(location_id) ON DELETE CASCADE
+        );
+        ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS location_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            location_id INTEGER NOT NULL,
+            task TEXT NOT NULL,
+            UNIQUE (location_id, task),
+            FOREIGN KEY (location_id) REFERENCES locations(location_id) ON DELETE CASCADE
+        );
+        ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS location_upgrades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            location_id INTEGER NOT NULL,
+            upgrade TEXT NOT NULL,
+            UNIQUE (location_id, upgrade),
+            FOREIGN KEY (location_id) REFERENCES locations(location_id) ON DELETE CASCADE
+        );
+        ''')
+
         await db.commit()
 
 
@@ -474,21 +535,54 @@ async def update_games_from_json_to_db(database_location):
             await db.commit()
 
 
-async def update_reputation_from_json_to_db(database_location):
+async def update_locations_from_json_to_db(database_location):
+    with open(os.path.join(game_data_folder, 'locations.json'), encoding='utf-8') as file:
+        locations = json.load(file)
+
+    async with aiosqlite.connect(database_location) as db:
+        for location in locations:
+
+            await db.execute('''
+                INSERT OR REPLACE INTO locations (location_id, name, icon_png, description)
+                VALUES (?, ?, ?, ?)
+            ''', (location["id"], location["name"], location["icon_png"], location["description"]))
+
+            for activity in location.get("activities", []):
+                await db.execute('''
+                    INSERT OR IGNORE INTO location_activities (location_id, activity)
+                    VALUES (?, ?)
+                ''', (location["id"], activity))
+
+            for task in location.get("tasks", []):
+                await db.execute('''
+                    INSERT OR IGNORE INTO location_tasks (location_id, task)
+                    VALUES (?, ?)
+                ''', (location["id"], task))
+
+            for upgrade in location.get("upgrades", []):
+                await db.execute('''
+                    INSERT OR IGNORE INTO location_upgrades (location_id, upgrade)
+                    VALUES (?, ?)
+                ''', (location["id"], upgrade))
+
+        await db.commit()
+
+
+async def update_reputations_from_json_to_db(database_location):
     with open(os.path.join(game_data_folder, 'reputation.json'), encoding='utf-8') as file:
         reputation = json.load(file)
 
     async with aiosqlite.connect(database_location) as db:
         if reputation:
             await db.execute('''
-                INSERT OR REPLACE INTO reputation (reputation_id, name, description, start_level, max_level, base_exp_requirement, scaling_factor, exp_formula)
+                INSERT OR REPLACE INTO reputations (reputation_id, name, description, start_level, max_level, base_exp_requirement, scaling_factor, exp_formula)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (reputation['id'], reputation['name'], reputation['description'], reputation['start_level'], reputation['max_level'], reputation['base_exp_requirement'], reputation['scaling_factor'], reputation['exp_formula']))
 
         await db.commit()
 
 
-async def update_reputation_unlocks_from_json_to_db(database_location):
+async def update_reputations_unlocks_from_json_to_db(database_location):
     with open(os.path.join(game_data_folder, 'reputation_unlocks.json'), encoding='utf-8') as file:
         unlocks = json.load(file)
 
@@ -522,7 +616,7 @@ async def update_reputation_unlocks_from_json_to_db(database_location):
         await db.commit()
 
 
-async def update_reputation_titles_from_json_to_db(database_location):
+async def update_reputations_titles_from_json_to_db(database_location):
     with open(os.path.join(game_data_folder, 'reputation_titles.json'), encoding='utf-8') as file:
         titles = json.load(file)
 
@@ -829,6 +923,23 @@ async def update_player_skills(db, player_id, player_skills):
             INSERT OR REPLACE INTO player_skills (player_id, skill_id, current_level, current_exp)
             VALUES (?, ?, ?, ?)
         ''', (player_id, skill_id, current_level, current_exp))
+
+
+async def update_player_locations(db, player_id, player_location):
+    # Clear all locations that player doesn't have anymore
+    if player_location is not None:
+        query = "DELETE FROM player_locations WHERE player_id = ? AND location_id != ?"
+        params_locations = [player_id, player_location.id]
+        await db.execute(query, params_locations)
+    else:
+        await db.execute("DELETE FROM player_locations WHERE player_id = ?", (player_id,))
+
+    # Add or update changed locations
+    if player_location:
+        await db.execute('''
+            INSERT OR REPLACE INTO player_locations (player_id, location_id)
+            VALUES (?, ?)
+        ''', (player_id, player_location.id))
 
 
 async def update_player_activities(db, player_id, player_activity):
