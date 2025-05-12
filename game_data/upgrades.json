@@ -318,5 +318,17 @@
         "description": "Local herbalist is willing to buy plants from you.",
         "effects": {
         }
+    },
+    {
+        "id": "21",
+        "name": "Road To Next Village",
+        "cost_material": "coins",
+        "cost": 30,
+        "max_purchases": 1,
+        "unlock_conditions": [],
+        "unlocks": ["road_to_next_village"],
+        "description": "You buy the village elder a beer and bread, he tells you next town location in return.",
+        "effects": {
+        }
     }
 ]

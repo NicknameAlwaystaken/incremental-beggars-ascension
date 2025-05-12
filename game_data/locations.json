@@ -21,8 +21,31 @@
             "Pot for plants",
             "Familiar pockets",
             "Herbalist's Fetcher",
-            "Fishmonger's Token"
+            "Fishmonger's Token",
+            "Road To Next Village"
         ],
+        "unlock_conditions": [],
         "description": "Village you were born and raised in, you wish to be nice to the villagers."
+    },
+    {
+        "id": 1,
+        "name": "Next Village",
+        "icon_png": "next_village",
+        "activities": [
+            "Rob Beggars",
+            "Wheelbarrow Gravel"
+        ],
+        "tasks": [
+        ],
+        "upgrades": [
+            "Pouch",
+            "Sticky fingers",
+            "Tattered Mat",
+            "Bigger Pouches",
+            "Pots as stash",
+            "Wheelbarrow"
+        ],
+        "unlock_conditions": ["road_to_next_village"],
+        "description": "No description"
     }
 ]

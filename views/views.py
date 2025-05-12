@@ -37,16 +37,17 @@ class BaseView(discord.ui.View):
 
 
 class MainMenuView(BaseView):
-    def __init__(self, cog, user_id, *, activities_cb, tasks_cb, shop_cb, update_cb):
+    def __init__(self, cog, user_id, *, activities_cb, tasks_cb, shop_cb, locations_cb, update_cb):
         super().__init__(cog, user_id)
         self.create_main_menu(
             activities_cb=activities_cb,
             tasks_cb=tasks_cb,
             shop_cb=shop_cb,
+            locations_cb=locations_cb,
             update_cb=update_cb,
         )
 
-    def create_main_menu(self, *, activities_cb, tasks_cb, shop_cb, update_cb):
+    def create_main_menu(self, *, activities_cb, tasks_cb, shop_cb, locations_cb, update_cb):
         self.clear_items()
 
         # Activities button
@@ -64,6 +65,11 @@ class MainMenuView(BaseView):
         shop_button = discord.ui.Button(label='Shop', style=discord.ButtonStyle.primary)
         shop_button.callback = partial(shop_cb, self.cog)
         self.add_item(shop_button)
+
+        # Locations button
+        locations_button = discord.ui.Button(label='Locations', style=discord.ButtonStyle.primary)
+        locations_button.callback = partial(locations_cb, self.cog)
+        self.add_item(locations_button)
 
         # Update button
         self.add_update_button(partial(update_cb, self.cog))
@@ -112,6 +118,44 @@ class ShopMenuView(BaseView):
                 self.add_next_button(partial(shop_cb, self.cog, page=page + 1))
 
 
+class LocationsMenuView(BaseView):
+    def __init__(self, cog, user_id, player, locations_per_page, page=1, *, locations_cb, back_cb, go_location_cb):
+        super().__init__(cog, user_id)
+        self.create_locations_menu(player, locations_per_page, page, locations_cb, back_cb, go_location_cb)
+
+    def create_locations_menu(self, player, locations_per_page, page, locations_cb, back_cb, go_location_cb):
+        self.clear_items()
+
+        locations = self.cog.get_available_locations(player)
+
+        locations_count = 0
+
+        for items in locations:
+            button_type, location = items
+            locations_count += 1
+
+            start_index = (page - 1) * locations_per_page
+            end_index = page * locations_per_page
+
+            if start_index < locations_count <= end_index:
+                if button_type == "disabled":
+                    continue
+
+                button_style = discord.ButtonStyle.success if player.current_location and player.current_location.id == location.id else discord.ButtonStyle.primary
+
+                location_button = discord.ui.Button(label=f'{location.name}', style=button_style)
+                location_button.callback = partial(go_location_cb, self.cog, location=location)
+                self.add_item(location_button)
+
+        self.add_back_button(partial(back_cb, self.cog))
+
+        if locations_count > locations_per_page:
+            if page > 1:
+                self.add_previous_button(partial(locations_cb, self.cog, page=page - 1))
+            if page * locations_per_page < locations_count:
+                self.add_next_button(partial(locations_cb, self.cog, page=page + 1))
+
+
 class ActivitiesMenuView(BaseView):
     def __init__(self, cog, user_id, player, activities_per_page, page=1, *, activities_cb, back_cb, start_cb):
         super().__init__(cog, user_id)
@@ -132,9 +176,10 @@ class ActivitiesMenuView(BaseView):
             end_index = page * activities_per_page
 
             if start_index < activities_count <= end_index:
-                button_style = discord.ButtonStyle.success if player.current_activity and player.current_activity.id == activity.id else discord.ButtonStyle.primary
                 if button_type == "disabled":
                     continue
+
+                button_style = discord.ButtonStyle.success if player.current_activity and player.current_activity.id == activity.id else discord.ButtonStyle.primary
 
                 activity_button = discord.ui.Button(label=f'{activity.name}', style=button_style)
                 activity_button.callback = partial(start_cb, self.cog, activity=activity)

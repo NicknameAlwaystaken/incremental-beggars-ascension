@@ -63,7 +63,7 @@ async def prepare_game_cog(game_cog: IncrementalGameCog):
     await game_cog.get_server_channels_from_db()
 
     await game_cog.get_items_from_db()
-    await game_cog.get_reputation_from_db()
+    await game_cog.get_reputations_from_db()
     await game_cog.get_upgrades_from_db()
     await game_cog.get_tasks_from_db()
     await game_cog.get_skills_from_db()

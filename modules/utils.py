@@ -1,5 +1,13 @@
 import math
 
+ACTIVITIES_PER_PAGE = 4
+
+TASKS_PER_PAGE = 5
+
+LOCATIONS_PER_PAGE = 5
+
+UPGRADES_PER_PAGE = 4
+
 def format_time(time_in_seconds: float):
     seconds = int(time_in_seconds)
     hours = seconds // 3600

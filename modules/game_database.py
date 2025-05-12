@@ -217,6 +217,15 @@ async def create_locations_table(database_location):
         );
         ''')
 
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS location_unlock_conditions (
+            location_id INTEGER,
+            unlock_condition TEXT,
+            PRIMARY KEY (location_id, unlock_condition),
+            FOREIGN KEY (location_id) REFERENCES locations (location_id) ON DELETE CASCADE
+        )
+        ''')
+
         await db.commit()
 
 
@@ -234,11 +243,20 @@ async def create_activities_table(database_location):
             energy_drain_rate REAL,
             skill TEXT,
             skill_exp_rate REAL,
-            unlock_conditions TEXT,
             description TEXT,
             status_description TEXT
         )
         ''')
+
+        await db.execute('''
+        CREATE TABLE IF NOT EXISTS activity_unlock_conditions (
+            activity_id INTEGER,
+            unlock_condition TEXT,
+            PRIMARY KEY (activity_id, unlock_condition),
+            FOREIGN KEY (activity_id) REFERENCES activities (activity_id) ON DELETE CASCADE
+        )
+        ''')
+
         await db.commit()
 
 
@@ -565,6 +583,12 @@ async def update_locations_from_json_to_db(database_location):
                     VALUES (?, ?)
                 ''', (location["id"], upgrade))
 
+            for unlock_condition in location.get("unlock_conditions", []):
+                await db.execute('''
+                    INSERT OR IGNORE INTO location_unlock_conditions (location_id, unlock_condition)
+                    VALUES (?, ?)
+                ''', (location["id"], unlock_condition))
+
         await db.commit()
 
 
@@ -668,17 +692,25 @@ async def update_activities_from_json_to_db(database_location):
     async with aiosqlite.connect(database_location) as db:
         for activity in activities:
             await db.execute('''
-                INSERT OR REPLACE INTO activities (activity_id, name, icon, output_item, output_amount, energy_type, energy_drain_rate, skill, skill_exp_rate, unlock_conditions, description, status_description)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (activity['id'], activity['name'], activity['icon'],
-                  activity['output_item'], activity['output_amount'],
-                  activity['energy_type'],
-                  activity['energy_drain_rate'],
-                  activity['skill'],
-                  activity['skill_exp_rate'],
-                  ','.join(activity['unlock_conditions']),
-                  activity['description'],
-                  activity['status_description']))
+                INSERT OR REPLACE INTO activities (
+                    activity_id, name, icon, output_item, output_amount,
+                    energy_type, energy_drain_rate, skill, skill_exp_rate,
+                    description, status_description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                activity['id'], activity['name'], activity['icon'],
+                activity['output_item'], activity['output_amount'],
+                activity['energy_type'], activity['energy_drain_rate'],
+                activity['skill'], activity['skill_exp_rate'],
+                activity['description'], activity['status_description']
+            ))
+
+            for condition in activity.get("unlock_conditions", []):
+                await db.execute('''
+                    INSERT OR IGNORE INTO activity_unlock_conditions (activity_id, unlock_condition)
+                    VALUES (?, ?)
+                ''', (activity['id'], condition))
+
         await db.commit()
 
 

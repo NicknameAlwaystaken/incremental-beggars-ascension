@@ -1,23 +1,16 @@
 from __future__ import annotations
 from functools import partial
 from modules.game_features import RPSGameSession, Task
-from modules.utils import format_number
+from modules.utils import ACTIVITIES_PER_PAGE, LOCATIONS_PER_PAGE, UPGRADES_PER_PAGE, format_number
 from views.dropdownviews import DropdownBaseView, PlayersDropdownView, RPSDropdownView, RPSView, StartChallengeView
-from views.views import ActivitiesMenuView, BaseView, MainMenuView, ShopMenuView, TasksMenuView
+from views.views import ActivitiesMenuView, BaseView, LocationsMenuView, MainMenuView, ShopMenuView, TasksMenuView
 from typing import TYPE_CHECKING
 import discord
 import random
 
 if TYPE_CHECKING:
     from bot_commands import IncrementalGameCog  # Only imported during type checking
-    from player_classes import Activity, Upgrade
-
-
-ACTIVITIES_PER_PAGE = 5
-
-TASKS_PER_PAGE = 5
-
-UPGRADES_PER_PAGE = 4
+    from player_classes import Activity, Upgrade, Location
 
 
 async def shop_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
@@ -61,9 +54,28 @@ async def main_menu_callback(cog: IncrementalGameCog, interaction: discord.Inter
             activities_cb=activities_menu_callback,
             tasks_cb=tasks_menu_callback,
             shop_cb=shop_menu_callback,
+            locations_cb=locations_menu_callback,
             update_cb=main_menu_callback,
         )
         await interaction.response.edit_message(content='', embed=cog.player_stats_embed_message(player), view=view)
+
+async def locations_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
+    user = interaction.user
+    if not await is_valid_interaction(cog, interaction):
+        return
+
+    player = await cog.get_player(user)
+    if player:
+        await cog.update_player(user)
+        if page < 1:
+            page = 1
+        view = LocationsMenuView(
+            cog, user.id, player, LOCATIONS_PER_PAGE, page,
+            locations_cb=locations_menu_callback,
+            back_cb=main_menu_callback,
+            go_location_cb=go_location_callback
+        )
+        await interaction.response.edit_message(content='', embed=cog.player_locations_embed_message(player, page), view=view)
 
 async def activities_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
     user = interaction.user
@@ -121,6 +133,24 @@ async def buy_upgrade_callback(cog: IncrementalGameCog, interaction: discord.Int
         )
         await interaction.response.edit_message(content='', embed=cog.player_shop_embed_message(player, page), view=view)
 
+async def go_location_callback(cog: IncrementalGameCog, interaction: discord.Interaction, location: Location, page=1):
+    user = interaction.user
+    if not await is_valid_interaction(cog, interaction):
+        return
+
+    player = await cog.get_player(user)
+
+    if player:
+        player.set_location(location)
+        await cog.update_player(user)
+        view = LocationsMenuView(
+            cog, user.id, player, ACTIVITIES_PER_PAGE, page,
+            locations_cb=locations_menu_callback,
+            back_cb=main_menu_callback,
+            go_location_cb=go_location_callback
+        )
+        await interaction.response.edit_message(content='', embed=cog.player_locations_embed_message(player, page), view=view)
+
 async def start_activity_callback(cog: IncrementalGameCog, interaction: discord.Interaction, activity: Activity, page=1):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
@@ -175,6 +205,7 @@ async def register_callback(cog: IncrementalGameCog, interaction: discord.Intera
                 activities_cb=activities_menu_callback,
                 tasks_cb=tasks_menu_callback,
                 shop_cb=shop_menu_callback,
+                locations_cb=locations_menu_callback,
                 update_cb=main_menu_callback,
             )
             await interaction.response.edit_message(content='', embed=cog.player_stats_embed_message(player), view=view)

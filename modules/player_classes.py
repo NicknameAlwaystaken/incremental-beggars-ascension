@@ -6,24 +6,28 @@ from datetime import datetime
 
 
 class Location:
-    def __init__(self, id, name, icon_png):
+    def __init__(self, id, name, icon_png, description):
         self.id = id
         self.name = name
         self.icon_png = icon_png
+        self.description = description
         self.activities: list[int] = []
         self.tasks: list[int] = []
         self.upgrades: list[int] = []
+        self.unlock_conditions: list[str] = []
 
     def copy(self):
         new_location = Location(
             id=self.id,
             name=self.name,
-            icon_png=self.icon_png
+            icon_png=self.icon_png,
+            description=self.description
         )
 
         new_location.activities = self.activities.copy()
         new_location.tasks = self.tasks.copy()
         new_location.upgrades = self.upgrades.copy()
+        new_location.unlock_conditions = self.unlock_conditions.copy()
 
         return new_location
 
@@ -225,7 +229,7 @@ class Activity:
                  energy_drain_rate: float,
                  skill: Optional[Skill],
                  skill_exp_rate: float,
-                 unlock_conditions: list[str], description: str,
+                 description: str,
                  status_description: str):
         self.id = id
         self.name = name
@@ -236,9 +240,9 @@ class Activity:
         self.energy_drain_rate = energy_drain_rate
         self.skill = skill
         self.skill_exp_rate = skill_exp_rate
-        self.unlock_conditions = unlock_conditions
         self.description = description
         self.status_description = status_description
+        self.unlock_conditions: list[str] = []
 
     def copy(self):
         new_activity = Activity(
@@ -251,10 +255,11 @@ class Activity:
             energy_drain_rate=self.energy_drain_rate,
             skill=self.skill,
             skill_exp_rate=self.skill_exp_rate,
-            unlock_conditions=self.unlock_conditions[:],
             description=self.description,
             status_description=self.status_description
         )
+
+        new_activity.unlock_conditions = self.unlock_conditions.copy()
 
         return new_activity
 
