@@ -7,7 +7,7 @@ from modules.game_database import update_player_activities, update_player_chips,
 from modules.game_features import Game, GameSession, RPSGameSession, Task
 from modules.menu_callbacks import activities_menu_callback, buy_chips_callback, locations_menu_callback, main_menu_callback, redeem_chips_callback, register_callback, select_players_callback, shop_menu_callback, tasks_menu_callback
 from modules.player_classes import Activity, Energy, Item, Location, Player, Reputation, Skill, Upgrade
-from modules.utils import ACTIVITIES_PER_PAGE, LOCATIONS_PER_PAGE, TASKS_PER_PAGE, UPGRADES_PER_PAGE, format_number, format_time
+from modules.utils import ACTIVITIES_PER_PAGE, LOCATIONS_PER_PAGE, TASKS_PER_PAGE, UPGRADES_PER_PAGE, format_number, format_time, set_embed_footer, set_embed_thumbnail
 from views.views import MainMenuView
 from views.dropdownviews import GamesDropdownView
 from copy import deepcopy
@@ -1082,17 +1082,6 @@ class IncrementalGameCog(commands.Cog):
             color=embed_color
         )
 
-        if player.current_activity:
-            activity_name = player.current_activity.name.lower()
-            file_name = activity_name.replace(" ", "_")
-            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{file_name}.png")
-
-        if player.current_location:
-            location_png = player.current_location.icon_png
-            location_name = player.current_location.name
-
-            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
-
         spacing_character = " "
         padding_amount = 25
         full_bar = "🟦"
@@ -1134,6 +1123,9 @@ class IncrementalGameCog(commands.Cog):
 
         if player.upgrades:
             embed.add_field(name="🛠️ Upgrades", value=', '.join([str(upgrade) for upgrade in player.upgrades.values()]), inline=False)
+
+        set_embed_footer(embed, player)
+        set_embed_thumbnail(embed, player)
 
         return embed
 
@@ -1183,17 +1175,6 @@ class IncrementalGameCog(commands.Cog):
             color=embed_color
         )
 
-        if player.current_activity:
-            activity_name = player.current_activity.name.lower()
-            file_name = activity_name.replace(" ", "_")
-            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{file_name}.png")
-
-        if player.current_location:
-            location_png = player.current_location.icon_png
-            location_name = player.current_location.name
-
-            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
-
         spacing_character = " "
         padding_amount = 25
         full_bar = "🟦"
@@ -1215,6 +1196,9 @@ class IncrementalGameCog(commands.Cog):
             value='\n\n'.join(missing_upgrades_text) if missing_upgrades_text else 'No more available upgrades to buy.',
             inline=False
         )
+
+        set_embed_footer(embed, player)
+        set_embed_thumbnail(embed, player)
 
         return embed
 
@@ -1279,21 +1263,10 @@ class IncrementalGameCog(commands.Cog):
             color=embed_color
         )
 
-        if player.current_activity:
-            activity_name = player.current_activity.name.lower()
-            file_name = activity_name.replace(" ", "_")
-            print(f"{file_name = }")
-            embed.set_thumbnail(
-                url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{file_name}.png"
-            )
-
-        if player.current_location:
-            location_png = player.current_location.icon_png
-            location_name = player.current_location.name
-
-            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
-
         embed.add_field(name='', value='\n\n'.join(activity_details), inline=False)
+
+        set_embed_footer(embed, player)
+        set_embed_thumbnail(embed, player)
 
         return embed
 
@@ -1327,18 +1300,10 @@ class IncrementalGameCog(commands.Cog):
             color=embed_color
         )
 
-        if player.current_activity:
-            activity_name = player.current_activity.name.lower()
-            file_name = activity_name.replace(" ", "_")
-            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{file_name}.png")
-
-        if player.current_location:
-            location_png = player.current_location.icon_png
-            location_name = player.current_location.name
-
-            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
-
         embed.add_field(name='', value='\n\n'.join(location_details), inline=False)
+
+        set_embed_footer(embed, player)
+        set_embed_thumbnail(embed, player)
 
         return embed
 
@@ -1392,17 +1357,6 @@ class IncrementalGameCog(commands.Cog):
             color=embed_color
         )
 
-        if player.current_activity:
-            activity_name = player.current_activity.name.lower()
-            file_name = activity_name.replace(" ", "_")
-            embed.set_thumbnail(url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{file_name}.png")
-
-        if player.current_location:
-            location_png = player.current_location.icon_png
-            location_name = player.current_location.name
-
-            embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
-
         spacing_character = " "
         padding_amount = 25
         full_bar = "🟦"
@@ -1420,6 +1374,10 @@ class IncrementalGameCog(commands.Cog):
         embed.add_field(name="🎒 Items", value='\n'.join(formatted_items), inline=False)
 
         embed.add_field(name='', value='\n\n'.join(task_details), inline=False)
+
+        set_embed_footer(embed, player)
+        set_embed_thumbnail(embed, player)
+
         return embed
 
     def format_upgrade_text(self, upgrade:  Upgrade):

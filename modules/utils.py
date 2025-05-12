@@ -1,4 +1,10 @@
+from __future__ import annotations
 import math
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import discord
+    from modules.player_classes import Player
 
 ACTIVITIES_PER_PAGE = 4
 
@@ -7,6 +13,23 @@ TASKS_PER_PAGE = 5
 LOCATIONS_PER_PAGE = 5
 
 UPGRADES_PER_PAGE = 4
+
+def set_embed_footer(embed: discord.Embed, player: Player):
+    if player.current_location:
+        location_png = player.current_location.icon_png
+        location_name = player.current_location.name
+
+        embed.set_footer(text=location_name,icon_url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/location/{location_png}.png")
+
+def set_embed_thumbnail(embed: discord.Embed, player: Player):
+    if player.current_activity:
+        activity_name = player.current_activity.name.lower()
+        # turn file name into snake case
+        file_name = activity_name.replace(" ", "_")
+        print(f"{file_name = }")
+        embed.set_thumbnail(
+            url=f"https://raw.githubusercontent.com/NicknameAlwaystaken/incremental-beggars-ascension/refs/heads/main/images/activity/{file_name}.png"
+        )
 
 def format_time(time_in_seconds: float):
     seconds = int(time_in_seconds)
