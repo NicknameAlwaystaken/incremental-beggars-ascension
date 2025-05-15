@@ -1,10 +1,66 @@
 from __future__ import annotations
 import discord
+import time
+import asyncio
 from functools import partial
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from modules.bot_commands import IncrementalGameCog  # Only imported during type checking
+
+
+class ActiveView:
+    def __init__(self, embed_cb, player_update_cb, message: discord.Message, min_interval=1.0, run_count=120):
+        self.embed_cb = embed_cb
+        self.player_update_cb = player_update_cb
+        self.message = message
+        self.last_updated: float = time.time()
+        self.min_interval: float = min_interval
+        self.run_count = run_count
+        self.current_run_count = 0
+        self.running = True
+        self.task: asyncio.Task = asyncio.create_task(self._run())
+
+    def restart(self):
+        self.current_run_count = 0
+        self.last_updated = time.time()
+        self.running = True
+        if self.task is not None and not self.task.done():
+            self.task.cancel()
+
+        self.task = asyncio.create_task(self._run())
+
+    def set_message(self, message: discord.Message):
+        self.message = message
+
+    def set_embed_cb(self, embed_cb):
+        self.embed_cb = embed_cb
+
+    async def _run(self):
+        while self.running:
+            await asyncio.sleep(0.1)  # check more often than min_interval for more consistent updates
+            current_time = time.time()
+            if current_time - self.last_updated >= self.min_interval:
+                await self.update()
+            if self.run_count <= self.current_run_count:
+                await self.stop()
+
+    async def update(self):
+        print(f"{self.current_run_count = }")
+        self.last_updated = time.time()
+        self.current_run_count += 1
+        await self.player_update_cb()
+        await self.message.edit(
+            content=f"Auto refresh for {((self.run_count-self.current_run_count) * self.min_interval):.0f} seconds.",
+            embed=self.embed_cb())
+
+    async def stop(self):
+        await self.message.edit(
+            content='',
+            embed=self.embed_cb())
+        self.running = False
+        if not self.task.done():
+            self.task.cancel()
 
 
 class BaseView(discord.ui.View):

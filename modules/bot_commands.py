@@ -7,7 +7,7 @@ from modules.game_features import Game, GameSession, RPSGameSession, Task
 from modules.menu_callbacks import activities_menu_callback, buy_chips_callback, locations_menu_callback, main_menu_callback, redeem_chips_callback, register_callback, select_players_callback, shop_menu_callback, tasks_menu_callback
 from modules.player_classes import Activity, Energy, Item, Location, Player, Reputation, Skill, Upgrade
 from modules.utils import ACTIVITIES_PER_PAGE, LOCATIONS_PER_PAGE, TASKS_PER_PAGE, UPGRADES_PER_PAGE, format_number, format_time, set_embed_footer, set_embed_thumbnail
-from views.views import MainMenuView
+from views.views import ActiveView, MainMenuView
 from views.dropdownviews import GamesDropdownView
 from copy import deepcopy
 from functools import partial, reduce
@@ -45,6 +45,7 @@ class IncrementalGameCog(commands.Cog):
         self.items: dict[int, Item] = {}
         self.tasks: dict[int, Task] = {}
         self.views: dict[int, discord.ui.View] = {}
+        self.active_views: dict[int, ActiveView] = {}
         self.games: dict[int, Game] = {}
         self.active_games: dict[int, GameSession | RPSGameSession] = {}
         self.allowed_channels = {}
@@ -303,11 +304,24 @@ class IncrementalGameCog(commands.Cog):
                 "\nGame is still in development so your progress"\
                 " may be reset multiple times until full version release!"
             message = await ctx.send(content=register_message, view=view)
+            self.views[message.id] = view
         else:
             await self.update_player(user)
-            message = await ctx.send(content='', embed=self.player_stats_embed_message(player), view=view)
+            embed_message = self.player_stats_embed_message(player)
+            message = await ctx.send(content='', embed=embed_message, view=view)
 
-        self.views[message.id] = view
+            if message.id in self.active_views:
+                # take care of any old messages
+                await self.active_views[message.id].stop()
+                del self.active_views[message.id]
+
+            played_update_cb = partial(self.update_player, user)
+            embed_cb = partial(self.player_stats_embed_message, player)
+            self.active_views[message.id] = ActiveView(
+                embed_cb=embed_cb,
+                player_update_cb=played_update_cb,
+                message=message
+            )
 
     def get_players_from_server(self, server_id):
         server = next((server for server in self.bot.guilds if server.id == server_id), None)
@@ -1093,7 +1107,7 @@ class IncrementalGameCog(commands.Cog):
         self.recalculate_player_modifiers(new_player)
         await self.player_to_database_update(user)
 
-    def player_stats_embed_message(self, player):
+    def player_stats_embed_message(self, player: Player):
         embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
         reputation_text = str(next((item for item in player.reputations.values() if item.name.lower() == "reputation"), ""))
         embed = discord.Embed(
@@ -1113,7 +1127,7 @@ class IncrementalGameCog(commands.Cog):
         empty_bar = "⬜"
 
         player_base_energy = player.energies[0]
-        recover_text = ' (Recovering energy)' if player_base_energy.recovering else ''
+        recover_text = ' (recovering energy)' if player_base_energy.recovering else ''
         if player.current_activity:
             embed.add_field(name="🏃 Current activity", value=player.current_activity.status_description + recover_text, inline=False)
         else:
@@ -1135,7 +1149,7 @@ class IncrementalGameCog(commands.Cog):
             for energy in player.energies.values():
                 bars_to_fill = int(((energy.current_energy / energy.max_energy) * 100) // 10)
                 energy_bar = f'  {full_bar * bars_to_fill}' + f'{empty_bar * (10 - bars_to_fill)}'
-                is_recovering_text = ' (Recovering)' if energy.recovering else ''
+                is_recovering_text = ' (recovering)' if energy.recovering else ''
                 energy_text = f"{energy.name.capitalize()}: {format_number(energy.current_energy)}/{format_number(energy.max_energy)}{is_recovering_text}"
 
                 formatted_energies.append(f"`{energy_text + (spacing_character * (padding_amount - len(energy_text)))} {energy_bar}`")
@@ -1227,7 +1241,7 @@ class IncrementalGameCog(commands.Cog):
 
         return embed
 
-    def player_activities_embed_message(self, player, page=1):
+    def player_activities_embed_message(self, player, page=1) -> discord.Embed:
         embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
 
         activities = self.get_available_activities(player)

@@ -45,17 +45,28 @@ async def main_menu_callback(cog: IncrementalGameCog, interaction: discord.Inter
     if not await is_valid_interaction(cog, interaction):
         return
 
-    await cog.update_player(user)
+    player = await cog.get_player(user)
+    if player:
+        await cog.update_player(user)
 
-    view = MainMenuView(
-        cog, user.id,
-        activities_cb=activities_menu_callback,
-        tasks_cb=tasks_menu_callback,
-        shop_cb=shop_menu_callback,
-        locations_cb=locations_menu_callback,
-        update_cb=main_menu_callback,
-    )
-    await interaction.response.edit_message(content='', embed=cog.player_stats_embed_message(player), view=view)
+        view = MainMenuView(
+            cog, user.id,
+            activities_cb=activities_menu_callback,
+            tasks_cb=tasks_menu_callback,
+            shop_cb=shop_menu_callback,
+            locations_cb=locations_menu_callback,
+            update_cb=main_menu_callback,
+        )
+
+        embed_message = cog.player_stats_embed_message(player)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_stats_embed_message, player))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def locations_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
@@ -72,9 +83,18 @@ async def locations_menu_callback(cog: IncrementalGameCog, interaction: discord.
             cog, user.id, player, LOCATIONS_PER_PAGE, page,
             locations_cb=locations_menu_callback,
             back_cb=main_menu_callback,
-            go_location_cb=go_location_callback
+            go_location_cb=change_location_callback
         )
-        await interaction.response.edit_message(content='', embed=cog.player_locations_embed_message(player, page), view=view)
+
+        embed_message = cog.player_locations_embed_message(player, page)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_locations_embed_message, player, page))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def activities_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
@@ -93,7 +113,16 @@ async def activities_menu_callback(cog: IncrementalGameCog, interaction: discord
             back_cb=main_menu_callback,
             start_cb=start_activity_callback
         )
-        await interaction.response.edit_message(content='', embed=cog.player_activities_embed_message(player, page), view=view)
+
+        embed_message = cog.player_activities_embed_message(player, page)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_activities_embed_message, player, page))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def tasks_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
@@ -113,7 +142,16 @@ async def tasks_menu_callback(cog: IncrementalGameCog, interaction: discord.Inte
             back_cb=main_menu_callback,
             start_cb=start_task_callback
         )
-        await interaction.response.edit_message(content='', embed=cog.player_tasks_embed_message(player, page), view=view)
+
+        embed_message = cog.player_tasks_embed_message(player, page)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_tasks_embed_message, player, page))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def buy_upgrade_callback(cog: IncrementalGameCog, interaction: discord.Interaction, upgrade: Upgrade, page=1):
@@ -133,10 +171,19 @@ async def buy_upgrade_callback(cog: IncrementalGameCog, interaction: discord.Int
             back_cb=main_menu_callback,
             buy_upgrade_cb=buy_upgrade_callback,
         )
-        await interaction.response.edit_message(content='', embed=cog.player_shop_embed_message(player, page), view=view)
+
+        embed_message = cog.player_shop_embed_message(player, page)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_shop_embed_message, player, page))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
-async def go_location_callback(cog: IncrementalGameCog, interaction: discord.Interaction, location: Location, page=1):
+async def change_location_callback(cog: IncrementalGameCog, interaction: discord.Interaction, location: Location, page=1):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
         return
@@ -150,9 +197,18 @@ async def go_location_callback(cog: IncrementalGameCog, interaction: discord.Int
             cog, user.id, player, ACTIVITIES_PER_PAGE, page,
             locations_cb=locations_menu_callback,
             back_cb=main_menu_callback,
-            go_location_cb=go_location_callback
+            go_location_cb=change_location_callback
         )
-        await interaction.response.edit_message(content='', embed=cog.player_locations_embed_message(player, page), view=view)
+
+        embed_message = cog.player_locations_embed_message(player, page)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_locations_embed_message, player, page))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def start_activity_callback(cog: IncrementalGameCog, interaction: discord.Interaction, activity: Activity, page=1):
@@ -171,7 +227,16 @@ async def start_activity_callback(cog: IncrementalGameCog, interaction: discord.
             back_cb=main_menu_callback,
             start_cb=start_activity_callback
         )
-        await interaction.response.edit_message(content='', embed=cog.player_activities_embed_message(player, page), view=view)
+
+        embed_message = cog.player_activities_embed_message(player, page)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_activities_embed_message, player, page))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def start_task_callback(cog: IncrementalGameCog, interaction: discord.Interaction, task: Task, page=1):
@@ -190,7 +255,16 @@ async def start_task_callback(cog: IncrementalGameCog, interaction: discord.Inte
             back_cb=main_menu_callback,
             start_cb=start_task_callback
         )
-        await interaction.response.edit_message(content='', embed=cog.player_tasks_embed_message(player, page), view=view)
+
+        embed_message = cog.player_tasks_embed_message(player, page)
+
+        if interaction.message:
+            active_view = cog.active_views[interaction.message.id]
+            active_view.set_message(interaction.message)
+            active_view.set_embed_cb(partial(cog.player_activities_embed_message, player, page))
+            active_view.restart()
+
+        await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def register_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
@@ -214,7 +288,16 @@ async def register_callback(cog: IncrementalGameCog, interaction: discord.Intera
                 locations_cb=locations_menu_callback,
                 update_cb=main_menu_callback,
             )
-            await interaction.response.edit_message(content='', embed=cog.player_stats_embed_message(player), view=view)
+
+            embed_message = cog.player_stats_embed_message(player)
+
+            if interaction.message:
+                active_view = cog.active_views[interaction.message.id]
+                active_view.set_message(interaction.message)
+                active_view.set_embed_cb(partial(cog.player_stats_embed_message, player))
+                active_view.restart()
+
+            await interaction.response.edit_message(content='', embed=embed_message, view=view)
 
 
 async def buy_chips_callback(cog: IncrementalGameCog, interaction: discord.Interaction, amount: int):
@@ -445,9 +528,12 @@ async def rps_game_callback(cog: IncrementalGameCog, interaction: discord.Intera
 
 async def is_valid_interaction(cog: IncrementalGameCog, interaction: discord.Interaction):
     if interaction.message:
-        view = cog.views.get(interaction.message.id)
+        view = cog.views.get(interaction.message.id, None)
+        if view is None:
+            view = cog.active_views.get(interaction.message.id, None)
 
-        if (isinstance(view, BaseView) or isinstance(view, DropdownBaseView)) and not view.is_owner(interaction):
-            return False
+        if view is not None:
+            if (isinstance(view, BaseView) or isinstance(view, DropdownBaseView)) and not view.is_owner(interaction):
+                return False
 
     return True
