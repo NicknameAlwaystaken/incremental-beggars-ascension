@@ -31,11 +31,11 @@ class Game:
 
 
 class Task:
-    def __init__(self, id: int, name: str, icon: str, task_amount: int, description: str):
+    def __init__(self, id: int, name: str, icon: str, task_limit: int, description: str):
         self.id = id
         self.name = name
         self.icon = icon
-        self.task_amount = task_amount
+        self.task_limit = task_limit
         self.description = description
         self.outputs: list[dict[str, Any]] = []
         self.costs: list[dict[str, Any]] = []
@@ -49,7 +49,7 @@ class Task:
             self.id,
             self.name,
             self.icon,
-            self.task_amount,
+            self.task_limit,
             self.description
         )
 

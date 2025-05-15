@@ -19,7 +19,7 @@
         "unlock_conditions": ["farming", "sell_plants"],
         "unlocks": [],
         "description": "Sell plants for money. Who would actually buy them?",
-        "task_amount": -1,
+        "task_limit": -1,
         "effects": {
         }
     },
@@ -43,7 +43,7 @@
         "unlock_conditions": ["fishing", "sell_fish"],
         "unlocks": [],
         "description": "Sell fish for money. Good riddance!",
-        "task_amount": -1,
+        "task_limit": -1,
         "effects": {
         }
     },
@@ -58,7 +58,7 @@
             },
             {
                 "item": "reputation",
-                "amount": 10
+                "amount": 1
             }
         ],
         "costs": [],
@@ -71,7 +71,7 @@
         "unlock_conditions": [],
         "unlocks": [],
         "description": "Be of help around the village.",
-        "task_amount": -1,
+        "task_limit": 10,
         "effects": {
         }
     }

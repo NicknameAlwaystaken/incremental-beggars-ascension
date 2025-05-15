@@ -1,9 +1,8 @@
 from __future__ import annotations
-from typing import Optional
 from discord.app_commands import CommandTree
 from discord.ext import commands
 from datetime import datetime
-from modules.game_database import update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_locations, update_player_reputation, update_player_skills, update_player_upgrades
+from modules.game_database import update_player_activities, update_player_chips, update_player_data, update_player_energies, update_player_games, update_player_items, update_player_locations, update_player_reputation, update_player_skills, update_player_tasks, update_player_upgrades
 from modules.game_features import Game, GameSession, RPSGameSession, Task
 from modules.menu_callbacks import activities_menu_callback, buy_chips_callback, locations_menu_callback, main_menu_callback, redeem_chips_callback, register_callback, select_players_callback, shop_menu_callback, tasks_menu_callback
 from modules.player_classes import Activity, Energy, Item, Location, Player, Reputation, Skill, Upgrade
@@ -29,6 +28,8 @@ MAX_MESSAGE_LENGTH = 2000
 GAME_NAME = "Beggar's Ascension"
 
 PRESHOW_BASIC_UNLOCKS = ["manual labour"]
+
+DEFAULT_PLAYER_TASK_FLAGS: dict[str, int] = {"completed": 0, "available": 0}
 
 
 class IncrementalGameCog(commands.Cog):
@@ -299,7 +300,7 @@ class IncrementalGameCog(commands.Cog):
             view.create_register_menu(register_cb=register_callback)
             register_message = "You have not registered yet!" \
                 "\nGame offers content up to **level 10** of skills."\
-                "\n**WARNING** Game is still in development so your progress"\
+                "\nGame is still in development so your progress"\
                 " may be reset multiple times until full version release!"
             message = await ctx.send(content=register_message, view=view)
         else:
@@ -353,19 +354,6 @@ class IncrementalGameCog(commands.Cog):
                     self.energies[energy[0]] = Energy(
                         energy[0], energy[1],
                         energy[2], energy[3])
-
-    async def get_reputation_unlocks_from_db(self):
-        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
-            async with db.execute('''
-            SELECT unlock_id, name, description
-            FROM reputation_unlocks''') as cursor:
-
-                reputation_unlocks = await cursor.fetchall()
-
-                self.reputation_unlocks = {}
-                for unlock in reputation_unlocks:
-                    self.reputation_unlocks[unlock[0]] = ReputationUnlock(
-                        unlock[0], unlock[1], unlock[2])
 
     async def get_items_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -590,11 +578,10 @@ class IncrementalGameCog(commands.Cog):
                     if activity_id in self.activities:
                         self.activities[activity_id].unlock_conditions.append(condition)
 
-
     async def get_tasks_from_db(self):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             async with db.execute('''
-            SELECT task_id, name, icon, task_amount, description
+            SELECT task_id, name, icon, task_limit, description
             FROM tasks''') as cursor:
 
                 tasks = await cursor.fetchall()
@@ -605,7 +592,7 @@ class IncrementalGameCog(commands.Cog):
                         id=task[0],
                         name=task[1],
                         icon=task[2],
-                        task_amount=task[3],
+                        task_limit=task[3],
                         description=task[4]
                     )
 
@@ -800,6 +787,21 @@ class IncrementalGameCog(commands.Cog):
                     player.add_energy(energy)
                     energy.current_energy = current_amount
 
+    async def get_player_tasks_from_db(self, player_id):
+        await self.get_tasks_from_db()
+        async with aiosqlite.connect(GAME_DB_LOCATION) as db:
+            async with db.execute('''
+            SELECT player_id, task_id, completed, available
+            FROM player_tasks
+            WHERE player_id = ?''', (player_id,)) as cursor:
+
+                player_tasks = await cursor.fetchall()
+
+                for player_task in player_tasks:
+                    player_id, task_id, completed, available = player_task
+                    player = self.players[int(player_id)]
+                    player.task_status[task_id] = {"completed": completed, "available": available}
+
     async def get_player_items_from_db(self, player_id):
         await self.get_items_from_db()
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
@@ -924,6 +926,7 @@ class IncrementalGameCog(commands.Cog):
                     await self.get_player_reputations_from_db(player_id)
                     await self.get_player_upgrades_from_db(player_id)
                     await self.get_player_items_from_db(player_id)
+                    await self.get_player_tasks_from_db(player_id)
                     await self.get_player_skills_from_db(player_id)
                     await self.get_player_energies_from_db(player_id)
                     await self.get_player_activities_from_db(player_id)
@@ -947,6 +950,7 @@ class IncrementalGameCog(commands.Cog):
                     await self.register_player(user)
                 return self.players[int(player_id)]
 
+        # check if player found in cache
         if player_id not in self.players:
             player = await self.get_player_from_db(user)
             if player:
@@ -955,6 +959,7 @@ class IncrementalGameCog(commands.Cog):
             else:
                 return None
         else:
+            # if player is in cache then just save to database and fetch player_data
             await self.player_to_database_update(user)
             return self.players[int(player_id)]
 
@@ -1025,6 +1030,19 @@ class IncrementalGameCog(commands.Cog):
             if key == "item":
                 item.amount -= cost
 
+        player_task_data = player.task_status.get(task.id, DEFAULT_PLAYER_TASK_FLAGS).copy()
+
+        print(f"{player_task_data = }")
+
+        # deduct available count only if completed more than the task limit
+        # and there is a limit
+        if task.task_limit != -1 and player_task_data["completed"] >= task.task_limit:
+            player_task_data["available"] = max(0, player_task_data["available"] - 1)
+
+        player_task_data["completed"] += 1
+
+        player.task_status[task.id] = player_task_data
+
     async def player_to_database_update(self, user: discord.User | discord.Member):
         async with aiosqlite.connect(GAME_DB_LOCATION) as db:
             player_id = user.id
@@ -1033,6 +1051,7 @@ class IncrementalGameCog(commands.Cog):
             player.display_name = user.display_name
             player_upgrades = [(id, upgrade.count) for id, upgrade in player.upgrades.items()]
             player_items = [(id, item.amount) for id, item in player.items.items()]
+            player_tasks = [(id, task["completed"], task["available"]) for id, task in player.task_status.items()]
             player_chips = player.chips
             player_activity = player.current_activity
             player_location = player.current_location
@@ -1045,6 +1064,7 @@ class IncrementalGameCog(commands.Cog):
 
             await update_player_upgrades(db, player_id, player_upgrades)
             await update_player_items(db, player_id, player_items)
+            await update_player_tasks(db, player_id, player_tasks)
             await update_player_skills(db, player_id, player_skills)
             await update_player_locations(db, player_id, player_location)
             await update_player_reputation(db, player_id, player_reputations)
@@ -1078,7 +1098,12 @@ class IncrementalGameCog(commands.Cog):
         reputation_text = str(next((item for item in player.reputations.values() if item.name.lower() == "reputation"), ""))
         embed = discord.Embed(
             title="🎩 Player Status",
-            description=f"**{player.title}**: __{player.display_name}__\n{reputation_text}\nPlaytime: {format_time((datetime.now() - player.start_date).total_seconds())}\nTime passed: {format_time(player.time_since_last_update)}",
+            description=(
+                f"**{player.title}**: __{player.display_name}__\n" +
+                f"{reputation_text}\n" +
+                # f"Playtime: {format_time((datetime.now() - player.start_date).total_seconds())}\n" +
+                f"Time passed: {format_time(player.time_since_last_update)}"
+            ),
             color=embed_color
         )
 
@@ -1270,7 +1295,7 @@ class IncrementalGameCog(commands.Cog):
 
         return embed
 
-    def player_locations_embed_message(self, player, page=1):
+    def player_locations_embed_message(self, player: Player, page=1):
         embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
 
         locations = self.get_available_locations(player)
@@ -1286,10 +1311,26 @@ class IncrementalGameCog(commands.Cog):
             start_index = (page - 1) * LOCATIONS_PER_PAGE
             end_index = page * LOCATIONS_PER_PAGE
 
+            location_upgrades_dict = self.get_location_upgrades(location)
+            missing_upgrades_count = len([
+                    upgrade for upgrade in location_upgrades_dict.values()
+                    if self.satisfies_unlock_conditions(player, upgrade.unlock_conditions)
+            ])
+
+            location_upgrades_count = len(location_upgrades_dict)
+
+            owned_upgrades_count = len([
+                    upgrade for id, upgrade in location_upgrades_dict.items()
+                    if id in player.upgrades
+            ])
+
+            upgrades_in_location_text = f"**Upgrades** - Owned: {location_upgrades_count - (location_upgrades_count - owned_upgrades_count)}/{location_upgrades_count} Available: {missing_upgrades_count}"
+
             if start_index < locations_count <= end_index:
                 location_details.append(
                     f"**{location.name}**"
                     f"\n*{location.description}*"
+                    f"\n{upgrades_in_location_text}"
                 )
 
         pages = max(1, math.ceil(locations_count / LOCATIONS_PER_PAGE))
@@ -1307,7 +1348,7 @@ class IncrementalGameCog(commands.Cog):
 
         return embed
 
-    def player_tasks_embed_message(self, player, page=1):
+    def player_tasks_embed_message(self, player: Player, page=1):
         embed_color = discord.Color.green() if player.current_activity else discord.Color.red()
 
         tasks = self.get_available_tasks(player)
@@ -1340,11 +1381,19 @@ class IncrementalGameCog(commands.Cog):
                 for output in task.outputs:
                     output_list.append(f'__{format_number(output['amount'])}__ {output['item'].capitalize()}')
 
+                task_amount_text = ""
+                if task.task_limit != -1:
+                    player_task_data = player.task_status.get(task.id, {"completed": 0, "available": 0})
+                    limit_amount = max(0,  task.task_limit - player_task_data["completed"])
+                    available_amount = player_task_data["available"]
+                    task_amount_text = f"\nTask amount: `{limit_amount + available_amount}`"
+
                 output_text = outputs_intro_text + ('\n' if len(output_list) > 1 else '') + '\n'.join(output_list)
 
                 task_details.append(
                     f"**{task.name}**"
                     f"\n*{task.description}*"
+                    f"{task_amount_text}"
                     f"{cost_text}"
                     f"{output_text}"
                 )
@@ -1471,7 +1520,7 @@ class IncrementalGameCog(commands.Cog):
 
         return activities_list
 
-    def get_available_locations(self, player) -> list[tuple[str, Location]]:
+    def get_available_locations(self, player: Player) -> list[tuple[str, Location]]:
         locations_list = []
         for location in self.locations.values():
             button_type = "enabled"
@@ -1488,21 +1537,23 @@ class IncrementalGameCog(commands.Cog):
 
         return locations_list
 
-
-    def get_available_tasks(self, player) -> list[Task]:
+    def get_available_tasks(self, player: Player) -> list[Task]:
         tasks_list = []
         for task in self.tasks.values():
-            if player.current_location:
-                if task.id not in player.current_location.tasks:
-                    continue;
-
-            if task.unlock_conditions:
-                list_of_preshown_conditions = PRESHOW_BASIC_UNLOCKS
-                if not all(condition in list_of_preshown_conditions for condition in task.unlock_conditions):
-                    if not all(condition in player.unlock_conditions for condition in task.unlock_conditions):
+            player_task_data = player.task_status.get(task.id, {"completed": 0, "available": 0})
+            has_reached_limit = task.task_limit <= player_task_data["completed"]
+            if task.task_limit == -1 or not has_reached_limit or player_task_data["available"] > 0:
+                if player.current_location:
+                    if task.id not in player.current_location.tasks:
                         continue
 
-            tasks_list.append(task)
+                if task.unlock_conditions:
+                    list_of_preshown_conditions = PRESHOW_BASIC_UNLOCKS
+                    if not all(condition in list_of_preshown_conditions for condition in task.unlock_conditions):
+                        if not all(condition in player.unlock_conditions for condition in task.unlock_conditions):
+                            continue
+
+                tasks_list.append(task)
 
         return tasks_list
 

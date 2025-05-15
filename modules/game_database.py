@@ -267,7 +267,8 @@ async def create_player_tasks_table(database_location):
         CREATE TABLE IF NOT EXISTS player_tasks (
             player_id INTEGER NOT NULL,
             task_id INTEGER NOT NULL,
-            count INTEGER NOT NULL DEFAULT 1,
+            completed INTEGER NOT NULL DEFAULT 0,
+            available INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (player_id, task_id),
             FOREIGN KEY (task_id) REFERENCES tasks(task_id)
         )
@@ -298,7 +299,7 @@ async def create_tasks_table(database_location):
             task_id INTEGER PRIMARY KEY,
             name TEXT UNIQUE,
             icon TEXT,
-            task_amount INTEGER,
+            task_limit INTEGER,
             description TEXT
         )
         ''')
@@ -736,10 +737,10 @@ async def update_tasks_from_json_to_db(database_location):
         for task in tasks:
             await db.execute('''
                 INSERT OR REPLACE INTO tasks (task_id, name, icon,
-                task_amount, description)
+                task_limit, description)
                 VALUES (?, ?, ?, ?, ?)
             ''', (task['id'], task['name'], task['icon'],
-                  task['task_amount'],  task['description']))
+                  task['task_limit'],  task['description']))
 
             await db.execute('DELETE FROM task_outputs WHERE task_id = ?', (task['id'],))
             for output in task['outputs']:
@@ -876,6 +877,25 @@ async def update_player_upgrades(db, player_id, player_upgrades):
         ''', (player_id, player_upgrade[0], player_upgrade[1]))
 
 
+async def update_player_tasks(db, player_id, player_tasks):
+    placeholders_tasks = ', '.join('?' for _ in player_tasks)
+
+    # Clear all tasks that player doesn't have anymore
+    if player_tasks:
+        query = f"DELETE FROM player_tasks WHERE player_id = ? AND task_id NOT IN ({placeholders_tasks})"
+        params_tasks = [player_id] + [task[0] for task in player_tasks]
+        await db.execute(query, params_tasks)
+    else:
+        await db.execute("DELETE FROM player_tasks WHERE player_id = ?", (player_id,))
+
+    # Add or update changed tasks
+    for player_task in player_tasks:
+        await db.execute('''
+            INSERT OR REPLACE INTO player_tasks (player_id, task_id, completed, available)
+            VALUES (?, ?, ?, ?)
+        ''', (player_id, player_task[0], player_task[1], player_task[2]))
+
+
 async def update_player_items(db, player_id, player_items):
     placeholders_items = ', '.join('?' for _ in player_items)
 
@@ -930,6 +950,16 @@ async def update_player_energies(db, player_id, player_energies):
 
 
 async def update_player_reputation(db, player_id, player_reputations):
+    placeholders_reputations = ', '.join('?' for _ in player_reputations)
+
+    # Clear all reputations that the player doesn't have anymore
+    if player_reputations:
+        query = f"DELETE FROM player_reputations WHERE player_id = ? AND reputation_id NOT IN ({placeholders_reputations})"
+        params_reputations = [player_id] + [reputation[0] for reputation in player_reputations]
+        await db.execute(query, params_reputations)
+    else:
+        await db.execute("DELETE FROM player_reputations WHERE player_id = ?", (player_id,))
+
     # Add or update the player's reputations
     for reputation_id, current_level, current_exp in player_reputations:
         await db.execute('''

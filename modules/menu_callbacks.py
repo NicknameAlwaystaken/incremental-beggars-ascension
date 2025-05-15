@@ -31,33 +31,32 @@ async def shop_menu_callback(cog: IncrementalGameCog, interaction: discord.Inter
         )
         await interaction.response.edit_message(content='', embed=cog.player_shop_embed_message(player, page), view=view)
 
+
 async def update_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
         return
 
-    player = await cog.get_player(user)
-    if player:
-        await cog.update_player(user)
+    await cog.update_player(user)
+
 
 async def main_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
         return
 
-    player = await cog.get_player(user)
-    if player:
-        await cog.update_player(user)
+    await cog.update_player(user)
 
-        view = MainMenuView(
-            cog, user.id,
-            activities_cb=activities_menu_callback,
-            tasks_cb=tasks_menu_callback,
-            shop_cb=shop_menu_callback,
-            locations_cb=locations_menu_callback,
-            update_cb=main_menu_callback,
-        )
-        await interaction.response.edit_message(content='', embed=cog.player_stats_embed_message(player), view=view)
+    view = MainMenuView(
+        cog, user.id,
+        activities_cb=activities_menu_callback,
+        tasks_cb=tasks_menu_callback,
+        shop_cb=shop_menu_callback,
+        locations_cb=locations_menu_callback,
+        update_cb=main_menu_callback,
+    )
+    await interaction.response.edit_message(content='', embed=cog.player_stats_embed_message(player), view=view)
+
 
 async def locations_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
     user = interaction.user
@@ -77,6 +76,7 @@ async def locations_menu_callback(cog: IncrementalGameCog, interaction: discord.
         )
         await interaction.response.edit_message(content='', embed=cog.player_locations_embed_message(player, page), view=view)
 
+
 async def activities_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
@@ -94,6 +94,7 @@ async def activities_menu_callback(cog: IncrementalGameCog, interaction: discord
             start_cb=start_activity_callback
         )
         await interaction.response.edit_message(content='', embed=cog.player_activities_embed_message(player, page), view=view)
+
 
 async def tasks_menu_callback(cog: IncrementalGameCog, interaction: discord.Interaction, page=1):
     user = interaction.user
@@ -114,6 +115,7 @@ async def tasks_menu_callback(cog: IncrementalGameCog, interaction: discord.Inte
         )
         await interaction.response.edit_message(content='', embed=cog.player_tasks_embed_message(player, page), view=view)
 
+
 async def buy_upgrade_callback(cog: IncrementalGameCog, interaction: discord.Interaction, upgrade: Upgrade, page=1):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
@@ -133,6 +135,7 @@ async def buy_upgrade_callback(cog: IncrementalGameCog, interaction: discord.Int
         )
         await interaction.response.edit_message(content='', embed=cog.player_shop_embed_message(player, page), view=view)
 
+
 async def go_location_callback(cog: IncrementalGameCog, interaction: discord.Interaction, location: Location, page=1):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
@@ -150,6 +153,7 @@ async def go_location_callback(cog: IncrementalGameCog, interaction: discord.Int
             go_location_cb=go_location_callback
         )
         await interaction.response.edit_message(content='', embed=cog.player_locations_embed_message(player, page), view=view)
+
 
 async def start_activity_callback(cog: IncrementalGameCog, interaction: discord.Interaction, activity: Activity, page=1):
     user = interaction.user
@@ -169,6 +173,7 @@ async def start_activity_callback(cog: IncrementalGameCog, interaction: discord.
         )
         await interaction.response.edit_message(content='', embed=cog.player_activities_embed_message(player, page), view=view)
 
+
 async def start_task_callback(cog: IncrementalGameCog, interaction: discord.Interaction, task: Task, page=1):
     user = interaction.user
     if not await is_valid_interaction(cog, interaction):
@@ -186,6 +191,7 @@ async def start_task_callback(cog: IncrementalGameCog, interaction: discord.Inte
             start_cb=start_task_callback
         )
         await interaction.response.edit_message(content='', embed=cog.player_tasks_embed_message(player, page), view=view)
+
 
 async def register_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
     user = interaction.user
@@ -210,6 +216,7 @@ async def register_callback(cog: IncrementalGameCog, interaction: discord.Intera
             )
             await interaction.response.edit_message(content='', embed=cog.player_stats_embed_message(player), view=view)
 
+
 async def buy_chips_callback(cog: IncrementalGameCog, interaction: discord.Interaction, amount: int):
     user = interaction.user
     player = await cog.get_player(user)
@@ -221,6 +228,7 @@ async def buy_chips_callback(cog: IncrementalGameCog, interaction: discord.Inter
 
     await cog.update_player(user)
     await cog.start_game(user, interaction, edit=True)
+
 
 async def redeem_chips_callback(cog: IncrementalGameCog, interaction: discord.Interaction, amount: int):
     user = interaction.user
@@ -237,6 +245,7 @@ async def redeem_chips_callback(cog: IncrementalGameCog, interaction: discord.In
     await cog.update_player(user)
     await cog.start_game(user, interaction, edit=True)
 
+
 async def select_players_callback(cog: IncrementalGameCog, interaction: discord.Interaction, option):
     if not await is_valid_interaction(cog, interaction):
         return
@@ -252,6 +261,7 @@ async def select_players_callback(cog: IncrementalGameCog, interaction: discord.
         content = f"You have `{format_number(player.chips)}` chips." \
             f"\n\nYou chose game **{option}**.\n\nNow choose player: "
         await interaction.response.edit_message(content=content, view=view)
+
 
 async def set_challenge_callback(cog: IncrementalGameCog, interaction: discord.Interaction, chosen_opponent, game_name):
     user = interaction.user
@@ -308,6 +318,7 @@ async def set_challenge_callback(cog: IncrementalGameCog, interaction: discord.I
                     cog.active_games[chosen_member.id] = new_game_session
                     await interaction.response.edit_message(delete_after=0)
 
+
 async def decline_challenge_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
     if not await is_valid_interaction(cog, interaction):
         return
@@ -329,6 +340,7 @@ async def decline_challenge_callback(cog: IncrementalGameCog, interaction: disco
     await game.decline()
 
     await interaction.response.edit_message(content='', embed=game.embed_message(), view=None)
+
 
 async def accept_challenge_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
     if not await is_valid_interaction(cog, interaction):
@@ -356,6 +368,7 @@ async def accept_challenge_callback(cog: IncrementalGameCog, interaction: discor
         make_choice_cb=partial(rps_choice_callback, cog)
     )
     await interaction.response.edit_message(embed=game.embed_message(), view=view)
+
 
 async def game_rematch_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
     if not await is_valid_interaction(cog, interaction):
@@ -395,6 +408,7 @@ async def game_rematch_callback(cog: IncrementalGameCog, interaction: discord.In
 
             await interaction.response.edit_message(content=f"\n\n**Rematch!**", embed=new_game_session.embed_message(), view=view)
 
+
 async def rps_choice_callback(cog: IncrementalGameCog, interaction: discord.Interaction):
     if not await is_valid_interaction(cog, interaction):
         return
@@ -403,6 +417,7 @@ async def rps_choice_callback(cog: IncrementalGameCog, interaction: discord.Inte
 
     view = RPSDropdownView(user.id, partial(rps_game_callback, cog))
     await interaction.response.send_message("Choose an option:", view=view, ephemeral=True)
+
 
 async def rps_game_callback(cog: IncrementalGameCog, interaction: discord.Interaction, option):
     user = interaction.user
@@ -426,6 +441,7 @@ async def rps_game_callback(cog: IncrementalGameCog, interaction: discord.Intera
                 return
 
         await game.update_message()
+
 
 async def is_valid_interaction(cog: IncrementalGameCog, interaction: discord.Interaction):
     if interaction.message:

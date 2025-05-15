@@ -81,7 +81,7 @@ async def prepare_game_cog(game_cog: IncrementalGameCog):
 async def setup(bot: commands.Bot):
     bot.add_command(make_tree_sync_command(bot.tree))
 
-    await create_tables();
+    await create_tables()
 
     game_cog = IncrementalGameCog(bot)
     await bot.add_cog(game_cog)

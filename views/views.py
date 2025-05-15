@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from modules.bot_commands import IncrementalGameCog  # Only imported during type checking
 
+
 class BaseView(discord.ui.View):
     def __init__(self, cog, user_id):
         super().__init__(timeout=None)

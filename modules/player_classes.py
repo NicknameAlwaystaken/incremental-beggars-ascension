@@ -359,6 +359,7 @@ class Player:
         self.skills: dict[int, Skill] = {}
         self.energies: dict[int, Energy] = {}
         self.games: dict[int, Game] = {}
+        self.task_status: dict[int, dict] = {}
         self.chips = 0
         self.stat_modifiers: dict[str, dict[str, float]] = {}
         self.unlock_conditions = []
